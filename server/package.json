@@ -1,0 +1,26 @@
+{
+  "name": "awedan-sahayak-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend API for Awedan Sahayak - AI-powered Hindi legal application generator",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "npx tsx src/index.ts",
+    "start": "npx tsx src/index.ts",
+    "build": "npx tsc"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "sharp": "^0.35.3",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────
+# Render Blueprint — Awedan Sahayak Backend
+# https://render.com/docs/blueprint-spec
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+  - type: web
+    name: awedan-sahayak-api
+    env: node
+    region: singapore                          # closest to Indian users
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free                                 # upgrade to Starter for no cold-starts
+    healthCheckPath: /api/health
+
+    envVars:
+      # ── AI Provider ──────────────────────────────────────────────────
+      # "claude" or "deepseek"
+      - key: AI_PROVIDER
+        sync: false                            # set manually in Render dashboard
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+
+      # ── Google Cloud Vision (Aadhar OCR) ─────────────────────────────
+      - key: GOOGLE_VISION_API_KEY
+        sync: false
+
+      # ── Server ───────────────────────────────────────────────────────
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"                         # placeholder — Render auto-assigns
+
+    # ── Disk ──────────────────────────────────────────────────────────
+    # Tesseract .traineddata files are ~15 MB total (eng + hin).
+    # The free plan includes no persistent disk. We ship the traineddata
+    # files inside the repo instead.

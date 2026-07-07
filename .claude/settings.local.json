@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npx create-expo-app@latest \"H:/awedan-sahayak/awedan-sahayak/app/AwedanSahayak\" --template blank-typescript 2>&1)",
+      "PowerShell(New-Item *)",
+      "PowerShell(Get-ChildItem -Recurse -Directory -Path \"H:/awedan-sahayak/awedan-sahayak/app/AwedanSahayak/src\" | ForEach-Object { $_.FullName.Replace\\(\"H:\\\\awedan-sahayak\\\\awedan-sahayak\\\\app\\\\AwedanSahayak\\\\\", \"\"\\) })",
+      "PowerShell(java *)",
+      "PowerShell(Write-Host \"ANDROID_HOME: $env:ANDROID_HOME\"; Write-Host \"ANDROID_SDK_ROOT: $env:ANDROID_SDK_ROOT\"; if \\(Test-Path \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\"\\) { Write-Host \"SDK found at: $env:LOCALAPPDATA\\\\Android\\\\Sdk\"; Get-ChildItem \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\" } elseif \\(Test-Path \"C:\\\\Android\\\\Sdk\"\\) { Write-Host \"SDK found at: C:\\\\Android\\\\Sdk\" } else { Write-Host \"No SDK found at standard locations\" })",
+      "PowerShell(npm *)",
+      "PowerShell(adb devices *)",
+      "PowerShell(Write-Host \"ANDROID_HOME: $env:ANDROID_HOME\"; Write-Host \"JAVA_HOME: $env:JAVA_HOME\"; Write-Host \"---\"; if \\(Test-Path \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\"\\) { Write-Host \"Found at LOCALAPPDATA\"; & \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" devices -l 2>&1 } elseif \\(Test-Path \"C:\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\"\\) { Write-Host \"Found at C:\\\\Android\"; & \"C:\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" devices -l 2>&1 } elseif \\($env:ANDROID_HOME\\) { $adbPath = Join-Path $env:ANDROID_HOME \"platform-tools\\\\adb.exe\"; if \\(Test-Path $adbPath\\) { Write-Host \"Found at ANDROID_HOME\"; & $adbPath devices -l 2>&1 } else { Write-Host \"ANDROID_HOME set but adb not found at $adbPath\" } } else { Write-Host \"Checking common paths...\"; Get-ChildItem \"$env:LOCALAPPDATA\\\\Android\" -ErrorAction SilentlyContinue; Get-ChildItem \"C:\\\\Android\" -ErrorAction SilentlyContinue })",
+      "PowerShell($adb = \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\"; Write-Host \"ADB path: $adb\"; Write-Host \"---\"; & $adb devices 2>&1; Write-Host \"---\"; & $adb kill-server 2>&1; Start-Sleep -Seconds 2; & $adb start-server 2>&1; Start-Sleep -Seconds 2; & $adb devices 2>&1)",
+      "PowerShell($env:ANDROID_HOME = \"C:\\\\Users\\\\PC\\\\AppData\\\\Local\\\\Android\\\\Sdk\"; $env:JAVA_HOME = \"C:\\\\Program Files\\\\Eclipse Adoptium\\\\jdk-17.0.19.10-hotspot\"; $env:Path = \"$env:ANDROID_HOME\\\\platform-tools;$env:JAVA_HOME\\\\bin;$env:Path\"; cd \"H:\\\\awedan-sahayak\\\\awedan-sahayak\\\\app\\\\AwedanSahayak\"; npx expo start --dev-client 2>&1)",
+      "PowerShell($env:ANDROID_HOME = \"C:\\\\Users\\\\PC\\\\AppData\\\\Local\\\\Android\\\\Sdk\"; $env:JAVA_HOME = \"C:\\\\Program Files\\\\Eclipse Adoptium\\\\jdk-17.0.19.10-hotspot\"; $env:Path = \"$env:ANDROID_HOME\\\\platform-tools;$env:JAVA_HOME\\\\bin;$env:Path\"; cd \"H:\\\\awedan-sahayak\\\\awedan-sahayak\\\\app\\\\AwedanSahayak\"; npx expo run:android 2>&1)",
+      "PowerShell(w32tm *)",
+      "PowerShell(adb *)",
+      "PowerShell(Get-MpComputerStatus *)",
+      "PowerShell(adb install *)",
+      "PowerShell(adb shell *)",
+      "PowerShell(adb reverse *)",
+      "PowerShell(Write-Host \"=== Server aiService.ts ===\"; npx tsc --noEmit --strict --moduleResolution node --target ES2020 --module ES2020 --esModuleInterop \"H:/awedan-sahayak/awedan-sahayak/server/src/services/aiService.ts\" 2>&1; Write-Host \"`n=== Server claudeService.ts ===\"; npx tsc --noEmit --strict --moduleResolution node --target ES2020 --module ES2020 --esModuleInterop \"H:/awedan-sahayak/awedan-sahayak/server/src/services/claudeService.ts\" 2>&1)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment (contains real secrets — never commit)
+.env
+
+# OS junk
+.DS_Store
+Thumbs.db
