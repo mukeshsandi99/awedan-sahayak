@@ -151,8 +151,8 @@ scanRouter.post('/scan-document', async (req: Request, res: Response) => {
       );
     }
 
-    const visionData = await visionResponse.json();
-    const annotation = visionData?.responses?.[0];
+    const visionData: any = await visionResponse.json();
+    const annotation: any = visionData?.responses?.[0];
 
     if (annotation?.error) {
       console.error('[POST /scan-document] Vision API error:', JSON.stringify(annotation.error));

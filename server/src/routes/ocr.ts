@@ -428,11 +428,11 @@ ocrRouter.post('/ocr-aadhar', async (req: Request, res: Response) => {
       throw new Error(`Vision API returned ${visionResponse.status}: ${JSON.stringify(err?.error ?? errText.substring(0, 300))}`);
     }
 
-    const visionData = await visionResponse.json();
+    const visionData: any = await visionResponse.json();
     console.log('[OCR Debug] Vision API response keys:', JSON.stringify(Object.keys(visionData)));
     console.log('[OCR Debug] responses[0] keys:', JSON.stringify(visionData?.responses?.[0] ? Object.keys(visionData.responses[0]) : 'MISSING'));
 
-    const annotation = visionData?.responses?.[0];
+    const annotation: any = visionData?.responses?.[0];
     const hasFullText = !!annotation?.fullTextAnnotation?.text;
     const hasTextAnnotations = !!annotation?.textAnnotations?.length;
     console.log(`[OCR Debug] fullTextAnnotation present: ${hasFullText}, textAnnotations present: ${hasTextAnnotations}`);
@@ -459,12 +459,12 @@ ocrRouter.post('/ocr-aadhar', async (req: Request, res: Response) => {
 
     // Step 3: Extract fields
     const allLines = rawText.split('\n');
-    const lines = allLines.filter((l) => l.trim().length > 0);
+    const lines = allLines.filter((l: string) => l.trim().length > 0);
     console.log(`[OCR Debug] Total lines: ${allLines.length}, non-empty lines: ${lines.length}`);
 
     if (lines.length > 0) {
       console.log('[OCR Debug] All lines:');
-      lines.forEach((l, i) => console.log(`[OCR Debug]   [${i}] "${l.trim()}"`));
+      lines.forEach((l: string, i: number) => console.log(`[OCR Debug]   [${i}] "${l.trim()}"`));
     }
 
     const extractedName = extractName(lines);
