@@ -24,6 +24,7 @@ import {
   deleteGeneratedApplication,
   type ApplicationListItem,
 } from '../database/db';
+import { isReminderOverdue, daysSinceReminder } from '../services/reminders';
 
 // ── Navigation type ────────────────────────────────────────────────────
 
@@ -122,6 +123,8 @@ export default function MyApplicationsScreen() {
     const typeName = item.type_name_hindi || item.type_name_english || 'अज्ञात आवेदन';
     const officeName = item.office_name_hindi || item.office_name_english || '';
     const snippet = getPreviewSnippet(item.generated_text);
+    const overdue = isReminderOverdue(item.reminder_date);
+    const overdueDays = daysSinceReminder(item.reminder_date);
 
     return (
       <TouchableOpacity
@@ -157,6 +160,16 @@ export default function MyApplicationsScreen() {
           </View>
           <Text style={styles.cardDate}>{formatDate(item.created_at)}</Text>
         </View>
+        {overdue && (
+          <View style={styles.overdueBadge}>
+            <Ionicons name="alert-circle" size={14} color="#D63031" />
+            <Text style={styles.overdueText}>
+              {overdueDays !== null && overdueDays >= 1
+                ? `${overdueDays}+ दिन हो गए — स्थिति जांचें`
+                : 'स्थिति जांचें'}
+            </Text>
+          </View>
+        )}
         {snippet ? (
           <Text style={styles.cardSnippet} numberOfLines={2}>
             {snippet}
@@ -339,6 +352,26 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 19,
     marginLeft: 50,
+  },
+
+  // Overdue badge
+  overdueBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF5F5',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 8,
+    marginLeft: 50,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#FFE0E0',
+  },
+  overdueText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#D63031',
   },
 
   // Empty state

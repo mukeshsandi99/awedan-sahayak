@@ -7,7 +7,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { draftApplication } from '../services/aiService';
+import { draftApplication, draftCustomApplication } from '../services/aiService';
 
 export const generateRouter = Router();
 
@@ -90,6 +90,91 @@ generateRouter.post('/generate-application', async (req: Request, res: Response)
     });
   } catch (err: any) {
     console.error('[POST /generate-application] Failed:', err.message);
+    res.status(500).json({
+      error: 'आवेदन पत्र जनरेट करने में त्रुटि। / Failed to generate application.',
+      detail: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    });
+  }
+});
+
+// ── Custom application generation ─────────────────────────────────────
+
+interface CustomGenerateRequest {
+  officeName: string;
+  recipientDesignation?: string | null;
+  customDescription: string;
+  formData: Record<string, string>;
+}
+
+function validateCustomGenerateRequest(body: any): { valid: true; data: CustomGenerateRequest } | { valid: false; error: string } {
+  if (!body || typeof body !== 'object') {
+    return { valid: false, error: 'Request body must be a JSON object.' };
+  }
+  if (!body.officeName || typeof body.officeName !== 'string' || !body.officeName.trim()) {
+    return { valid: false, error: 'Missing or invalid "officeName" (non-empty string required).' };
+  }
+  if (body.recipientDesignation !== undefined && body.recipientDesignation !== null && typeof body.recipientDesignation !== 'string') {
+    return { valid: false, error: 'Invalid "recipientDesignation" (string or null expected).' };
+  }
+  if (!body.customDescription || typeof body.customDescription !== 'string' || !body.customDescription.trim()) {
+    return { valid: false, error: 'Missing or invalid "customDescription" (non-empty string required).' };
+  }
+  if (!body.formData || typeof body.formData !== 'object' || Array.isArray(body.formData)) {
+    return { valid: false, error: 'Missing or invalid "formData" (object required).' };
+  }
+  return {
+    valid: true,
+    data: {
+      officeName: body.officeName.trim(),
+      recipientDesignation: body.recipientDesignation?.trim() || null,
+      customDescription: body.customDescription.trim(),
+      formData: body.formData,
+    },
+  };
+}
+
+generateRouter.post('/generate-custom-application', async (req: Request, res: Response) => {
+  console.log('[POST /generate-custom-application] Received request.');
+
+  const validation = validateCustomGenerateRequest(req.body);
+  if (!validation.valid) {
+    console.log('[POST /generate-custom-application] Validation failed:', validation.error);
+    res.status(400).json({ error: validation.error });
+    return;
+  }
+
+  const { officeName, recipientDesignation, customDescription, formData } = validation.data;
+
+  // Merge custom_description into formData so the AI sees it
+  const enrichedFormData = {
+    ...formData,
+    custom_description: customDescription,
+  };
+
+  console.log(`[POST /generate-custom-application] Office: ${officeName} | Designation: ${recipientDesignation || '(none)'}`);
+  console.log(`[POST /generate-custom-application] Description length: ${customDescription.length} chars`);
+  console.log(`[POST /generate-custom-application] Identity fields (${Object.keys(formData).length}):`, Object.keys(formData).join(', '));
+
+  try {
+    const result = await draftCustomApplication({
+      officeName,
+      recipientDesignation,
+      formData: enrichedFormData,
+    });
+
+    console.log(`[POST /generate-custom-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model}`);
+    res.json({
+      success: true,
+      generatedText: result.generatedText,
+      metadata: {
+        provider: result.provider,
+        model: result.model,
+        usage: result.usage,
+        isCustom: true,
+      },
+    });
+  } catch (err: any) {
+    console.error('[POST /generate-custom-application] Failed:', err.message);
     res.status(500).json({
       error: 'आवेदन पत्र जनरेट करने में त्रुटि। / Failed to generate application.',
       detail: process.env.NODE_ENV === 'development' ? err.message : undefined,

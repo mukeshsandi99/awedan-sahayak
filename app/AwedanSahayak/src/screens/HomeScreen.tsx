@@ -151,6 +151,33 @@ export default function HomeScreen({ navigation }: Props) {
         <Text style={styles.subtitle}>कार्यालय चुनें</Text>
       </View>
 
+      {/* Disclaimer banner */}
+      <View style={styles.disclaimerBanner}>
+        <Text style={styles.disclaimerText}>
+          ⚠️ यह ऐप किसी सरकारी संस्था से संबद्ध नहीं है - एक स्वतंत्र सहायक उपकरण{'\n'}
+          Not affiliated with any government entity - independent assistive tool
+        </Text>
+      </View>
+
+      {/* Custom / Blank application card */}
+      <TouchableOpacity
+        style={styles.customCard}
+        activeOpacity={0.7}
+        onPress={() => navigation.navigate('CustomApplication')}
+      >
+        <View style={styles.customIconCircle}>
+          <Ionicons name="create-outline" size={30} color="#FFFFFF" />
+        </View>
+        <View style={styles.scanTextGroup}>
+          <Text style={styles.scanCardTitle}>खाली आवेदन पत्र</Text>
+          <Text style={styles.scanCardSubtitle}>Create Your Own Application</Text>
+          <Text style={styles.scanCardHint}>
+            कोई भी कार्यालय, कोई भी आवेदन — अपने शब्दों में लिखें या बोलें
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={22} color="#CCC" />
+      </TouchableOpacity>
+
       {/* Scan handwritten application card */}
       <TouchableOpacity
         style={styles.scanCard}
@@ -217,6 +244,24 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  // Disclaimer banner
+  disclaimerBanner: {
+    backgroundColor: '#FFF3CD',
+    borderWidth: 1,
+    borderColor: '#FFC107',
+    borderRadius: 8,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  disclaimerText: {
+    fontSize: 11,
+    color: '#856404',
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+
   // Scan card (full-width, above office grid)
   scanCard: {
     flexDirection: 'row',
@@ -262,6 +307,34 @@ const styles = StyleSheet.create({
     color: '#AAA',
     marginTop: 6,
     lineHeight: 16,
+  },
+
+  // Custom application card (full-width, above scan card)
+  customCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 16,
+    padding: 16,
+    gap: 14,
+    borderWidth: 1.5,
+    borderColor: '#6C5CE7',
+    borderStyle: 'dashed',
+    shadowColor: '#6C5CE7',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  customIconCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#6C5CE7',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   grid: {

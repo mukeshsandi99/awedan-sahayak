@@ -25,6 +25,8 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { generatePdf, sharePdf, isSaveSupported } from '../services/pdf';
 import { generateRtf, shareRtf } from '../services/rtf';
+import { scheduleReminder, cancelScheduledReminder } from '../services/reminders';
+import { updateGeneratedApplication, getGeneratedApplicationById } from '../database/db';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -35,7 +37,19 @@ export interface ApplicationPreviewContentProps {
   generatedText: string;
   officeType: string;
   onGoBack: () => void;
+  /** The saved application ID, used for reminder scheduling. */
+  savedApplicationId?: number | null;
+  /** Whether this is viewed from MyApplications (shows cancel option). */
+  isFromMyApps?: boolean;
 }
+
+// ── Reminder options ──────────────────────────────────────────────────
+
+const REMINDER_OPTIONS = [
+  { days: 7, label: '7 दिन बाद' },
+  { days: 15, label: '15 दिन बाद (अनुशंसित)' },
+  { days: 30, label: '30 दिन बाद' },
+];
 
 // ── Shared content component ──────────────────────────────────────────
 
@@ -44,6 +58,8 @@ export function ApplicationPreviewContent({
   generatedText,
   officeType,
   onGoBack,
+  savedApplicationId,
+  isFromMyApps,
 }: ApplicationPreviewContentProps) {
 
   const [pdfGenerating, setPdfGenerating] = useState(false);
@@ -54,6 +70,13 @@ export function ApplicationPreviewContent({
   const [rtfUri, setRtfUri] = useState<string | null>(null);
   const [rtfFilename, setRtfFilename] = useState<string>('');
 
+  // ── Reminder state ──────────────────────────────────────────────
+
+  const [reminderSet, setReminderSet] = useState(false);
+  const [reminderDays, setReminderDays] = useState<number | null>(null);
+  const [reminderScheduling, setReminderScheduling] = useState(false);
+  const [notifId, setNotifId] = useState<string | null>(null);
+
   // ── Copy text to clipboard ──────────────────────────────────────
 
   const handleCopy = useCallback(() => {
@@ -62,6 +85,44 @@ export function ApplicationPreviewContent({
       'आवेदन पाठ क्लिपबोर्ड पर कॉपी कर दिया गया है।\n\nThe application text has been copied.',
     );
   }, []);
+
+  // ── Reminder scheduling ──────────────────────────────────────────
+
+  const officeName = getOfficeLabel(officeType);
+
+  const handleScheduleReminder = useCallback(async (days: number) => {
+    if (reminderScheduling) return;
+    setReminderScheduling(true);
+    try {
+      const result = await scheduleReminder(applicationName, officeName, days);
+      if (result) {
+        setReminderSet(true);
+        setReminderDays(days);
+        setNotifId(result.notificationId);
+        // Update the DB row with reminder info
+        if (savedApplicationId) {
+          await updateGeneratedApplication(savedApplicationId, {
+            reminder_date: result.reminderDate,
+            notification_id: result.notificationId,
+            reminder_days: days,
+          } as any);
+        }
+        Alert.alert('✅ याद दिलाना सेट हो गया', `${days} दिन बाद आपको सूचना मिलेगी।\n\nReminder set for ${days} days from now.`);
+      }
+    } catch (err: any) {
+      console.error('[Reminder] Schedule failed:', err?.message);
+    } finally {
+      setReminderScheduling(false);
+    }
+  }, [reminderScheduling, applicationName, officeName, savedApplicationId]);
+
+  const handleCancelReminder = useCallback(async () => {
+    await cancelScheduledReminder(notifId, savedApplicationId ?? 0);
+    setReminderSet(false);
+    setReminderDays(null);
+    setNotifId(null);
+    Alert.alert('🔕 याद दिलाना रद्द हुआ', 'अब आपको इस आवेदन के लिए सूचना नहीं मिलेगी।\n\nReminder cancelled.');
+  }, [notifId, savedApplicationId]);
 
   // ── Share as plain text ─────────────────────────────────────────
 
@@ -221,6 +282,56 @@ export function ApplicationPreviewContent({
 
       {/* Action bar */}
       <View style={styles.actionBar}>
+        {/* Row 0: Reminder selector (only for new applications, not from MyApps) */}
+        {savedApplicationId && !isFromMyApps && !reminderSet && (
+          <View style={styles.reminderRow}>
+            <Ionicons name="notifications-outline" size={18} color="#E17055" />
+            <Text style={styles.reminderLabel}>कब याद दिलाएं?</Text>
+            <View style={styles.reminderOptions}>
+              {REMINDER_OPTIONS.map((opt) => (
+                <TouchableOpacity
+                  key={opt.days}
+                  style={[styles.reminderChip, reminderScheduling && styles.reminderChipDisabled]}
+                  onPress={() => handleScheduleReminder(opt.days)}
+                  disabled={reminderScheduling}
+                  activeOpacity={0.7}
+                >
+                  {reminderScheduling ? (
+                    <ActivityIndicator size="small" color="#E17055" />
+                  ) : (
+                    <Text style={styles.reminderChipText}>{opt.label}</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Row 0b: Reminder active indicator + cancel */}
+        {reminderSet && (
+          <View style={styles.reminderActiveRow}>
+            <Ionicons name="notifications" size={16} color="#27AE60" />
+            <Text style={styles.reminderActiveText}>
+              {reminderDays} दिन बाद याद दिलाया जाएगा
+            </Text>
+            <TouchableOpacity onPress={handleCancelReminder} activeOpacity={0.7}>
+              <Text style={styles.reminderCancelText}>रद्द करें</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* For MyApps view: cancel reminder if one exists */}
+        {isFromMyApps && savedApplicationId && (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.actionSecondary]}
+            onPress={handleCancelReminder}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="notifications-off-outline" size={18} color="#E17055" />
+            <Text style={styles.actionSecondaryText}>याद दिलाना बंद करें</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Row 1: Edit + Copy + Share text */}
         <View style={styles.actionRow}>
           <TouchableOpacity
@@ -352,7 +463,7 @@ export function ApplicationPreviewContent({
 // ── HomeStack screen wrapper ──────────────────────────────────────────
 
 function ApplicationPreviewScreen({ route, navigation }: Props) {
-  const { applicationName, generatedText, officeType } = route.params;
+  const { applicationName, generatedText, officeType, savedApplicationId } = route.params;
 
   return (
     <ApplicationPreviewContent
@@ -360,6 +471,8 @@ function ApplicationPreviewScreen({ route, navigation }: Props) {
       generatedText={generatedText}
       officeType={officeType}
       onGoBack={() => navigation.goBack()}
+      savedApplicationId={savedApplicationId}
+      isFromMyApps={false}
     />
   );
 }
@@ -384,6 +497,7 @@ function getOfficeLabel(officeType: string): string {
     pwd: 'लोक निर्माण विभाग (PWD)',
     rcd: 'ग्रामीण कार्य विभाग (RCD)',
     bcd: 'भवन निर्माण विभाग (BCD)',
+    custom: 'खाली आवेदन (Custom Application)',
   };
   return labels[officeType] ?? officeType;
 }
@@ -509,5 +623,61 @@ const styles = StyleSheet.create({
   actionWord: {
     backgroundColor: '#2B579A',
     flex: 1.5,
+  },
+
+  // Reminders
+  reminderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  reminderLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#555',
+  },
+  reminderOptions: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  reminderChip: {
+    backgroundColor: '#FFF0ED',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#E17055',
+  },
+  reminderChipDisabled: {
+    opacity: 0.5,
+  },
+  reminderChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#E17055',
+  },
+  reminderActiveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EBFBEE',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  reminderActiveText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#27AE60',
+    fontWeight: '500',
+  },
+  reminderCancelText: {
+    fontSize: 13,
+    color: '#D63031',
+    fontWeight: '600',
   },
 });

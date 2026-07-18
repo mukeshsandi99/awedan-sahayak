@@ -96,7 +96,19 @@ export interface GeneratedApplication {
   /** FK to parent application if this is an escalation. */
   is_escalation_of: number | null;
   created_at: string;
+  /** ISO date string when the follow-up reminder should fire. */
+  reminder_date: string | null;
+  /** Expo Notifications identifier string (for cancellation). */
+  notification_id: string | null;
+  /** Number of days after generation to remind (default 15). */
+  reminder_days: number | null;
+  /** Free-text office name for custom/blank applications (null for predefined types). */
+  custom_office_name: string | null;
 }
+
+// ── Monetization types ─────────────────────────────────────────────────
+
+export type SubscriptionStatus = 'active' | 'expired' | 'none';
 
 // ── Insert types (omit auto-generated id & timestamp) ───────────────
 

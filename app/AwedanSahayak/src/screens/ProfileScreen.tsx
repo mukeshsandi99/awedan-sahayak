@@ -25,14 +25,20 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getUserProfile, createUserProfile, updateUserProfile, parseAddressComponents } from '../database/db';
-import type { UserProfile } from '../types/database';
+import type { UserProfile, SubscriptionStatus as SubStatus } from '../types/database';
 import { scanAadharCard, type AadharExtractedData } from '../services/aadhar';
+import { getFreeUsageCount, getPaidCredits, getSubscriptionStatus, FREE_TIER_LIMIT } from '../services/usageTracker';
 
 // ── Component ───────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // ── Subscription / usage state ──────────────────────────────────
+  const [subStatus, setSubStatus] = useState<SubStatus>('none');
+  const [freeUsed, setFreeUsed] = useState(0);
+  const [paidCredits, setPaidCredits] = useState(0);
 
   // ── OCR flow state ──────────────────────────────────────────────
   const [showPrivacyNotice, setShowPrivacyNotice] = useState(false);
@@ -60,6 +66,16 @@ export default function ProfileScreen() {
     try {
       const p = await getUserProfile();
       setProfile(p);
+
+      // Load monetization status in parallel
+      const [status, used, credits] = await Promise.all([
+        getSubscriptionStatus(),
+        getFreeUsageCount(),
+        getPaidCredits(),
+      ]);
+      setSubStatus(status);
+      setFreeUsed(used);
+      setPaidCredits(credits);
     } catch (err: any) {
       console.error('[Profile] Load failed:', err?.message);
     } finally {
@@ -189,18 +205,18 @@ export default function ProfileScreen() {
       if (__DEV__) { console.log('[Profile Save] Parsed components:', JSON.stringify(parsed)); }
 
       const updateData = {
-        name: reviewName.trim() || null,
-        dob: reviewDob || null,
-        gender: reviewGender.trim() || (profile?.gender ?? null),
-        address: parsed.cleanedAddress || (profile?.address ?? null),
-        phone: reviewPhone.trim() || (profile?.phone ?? null),
-        village: parsed.village || (profile?.village ?? null),
-        post: parsed.post || (profile?.post ?? null),
-        thana: parsed.thana || (profile?.thana ?? null),
-        district: parsed.district || (profile?.district ?? null),
-        state: parsed.state || (profile?.state ?? null),
-        parent_spouse_name: parsed.parent_spouse_name || (profile?.parent_spouse_name ?? null),
-        aadhar_last4: profile?.aadhar_last4 ?? null,
+        name: reviewName.trim() || undefined,
+        dob: reviewDob || undefined,
+        gender: reviewGender.trim() || (profile?.gender ?? undefined),
+        address: parsed.cleanedAddress || (profile?.address ?? undefined),
+        phone: reviewPhone.trim() || (profile?.phone ?? undefined),
+        village: parsed.village || (profile?.village ?? undefined),
+        post: parsed.post || (profile?.post ?? undefined),
+        thana: parsed.thana || (profile?.thana ?? undefined),
+        district: parsed.district || (profile?.district ?? undefined),
+        state: parsed.state || (profile?.state ?? undefined),
+        parent_spouse_name: parsed.parent_spouse_name || (profile?.parent_spouse_name ?? undefined),
+        aadhar_last4: profile?.aadhar_last4 ?? undefined,
       };
 
       if (__DEV__) { console.log('[Profile Save] Writing to DB:', JSON.stringify(updateData)); }
@@ -359,6 +375,31 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* ── Subscription / Usage Status ────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>आपकी सदस्यता (Subscription)</Text>
+          <View style={styles.fieldRow}>
+            <Text style={styles.fieldLabel}>सदस्यता</Text>
+            <Text style={[styles.fieldValue, { color: subStatus === 'active' ? '#27AE60' : '#E17055' }]}>
+              {subStatus === 'active' ? 'सक्रिय (Active)' : subStatus === 'expired' ? 'समाप्त (Expired)' : 'कोई नहीं (None)'}
+            </Text>
+          </View>
+          <View style={styles.fieldRow}>
+            <Text style={styles.fieldLabel}>मुफ्त प्रयोग</Text>
+            <Text style={styles.fieldValue}>
+              {freeUsed}/{FREE_TIER_LIMIT} उपयोग हो चुके
+            </Text>
+          </View>
+          {paidCredits > 0 && (
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>खरीदे गए क्रेडिट</Text>
+              <Text style={[styles.fieldValue, { color: '#27AE60' }]}>
+                {paidCredits} शेष (Remaining)
+              </Text>
+            </View>
+          )}
+        </View>
+
         {/* ── About App ─────────────────────────────────────────── */}
         <View style={styles.aboutSection}>
           <Text style={styles.aboutTitle}>ऐप के बारे में / About App</Text>
@@ -370,6 +411,12 @@ export default function ProfileScreen() {
             <Text style={styles.aboutCredit}>
               एम.एम. एंटरप्राइजेज द्वारा निर्मित{'\n'}
               Created by M.M. Enterprises
+            </Text>
+          </View>
+          <View style={styles.aboutDisclaimerRow}>
+            <Text style={styles.aboutDisclaimer}>
+              ⚠️ यह ऐप किसी सरकारी संस्था से संबद्ध नहीं है - एक स्वतंत्र सहायक उपकरण{'\n'}
+              Not affiliated with any government entity - independent assistive tool
             </Text>
           </View>
         </View>
@@ -682,6 +729,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
     lineHeight: 18,
+  },
+  aboutDisclaimerRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  aboutDisclaimer: {
+    fontSize: 11,
+    color: '#856404',
+    lineHeight: 16,
+    textAlign: 'center',
   },
 
   // Modals

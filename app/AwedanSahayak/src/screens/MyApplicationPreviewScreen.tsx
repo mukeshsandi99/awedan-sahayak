@@ -15,7 +15,7 @@ type Props = NativeStackScreenProps<MyApplicationsStackParamList, 'MyApplication
 // ── Component ───────────────────────────────────────────────────────
 
 export default function MyApplicationPreviewScreen({ route, navigation }: Props) {
-  const { applicationName, generatedText, officeType } = route.params;
+  const { applicationName, generatedText, officeType, applicationId } = route.params;
 
   return (
     <ApplicationPreviewContent
@@ -23,6 +23,8 @@ export default function MyApplicationPreviewScreen({ route, navigation }: Props)
       generatedText={generatedText}
       officeType={officeType}
       onGoBack={() => navigation.goBack()}
+      savedApplicationId={applicationId}
+      isFromMyApps={true}
     />
   );
 }

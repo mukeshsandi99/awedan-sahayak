@@ -7,18 +7,23 @@ import ApplicationTypeListScreen from '../screens/ApplicationTypeListScreen';
 import ApplicationFormScreen from '../screens/ApplicationFormScreen';
 import ApplicationPreviewScreen from '../screens/ApplicationPreviewScreen';
 import HandwritingScanScreen from '../screens/HandwritingScanScreen';
+import PaywallScreen from '../screens/PaywallScreen';
+import CustomApplicationScreen from '../screens/CustomApplicationScreen';
 
 export type HomeStackParamList = {
   HomeMain: undefined;
   ApplicationTypeList: { officeType: OfficeType; officeName: string };
   ApplicationForm: { applicationTypeId: number; applicationName: string };
+  CustomApplication: undefined;
   ApplicationPreview: {
     applicationName: string;
     generatedText: string;
     officeType: string;
-    applicationTypeId: number;
+    applicationTypeId: number | null;
+    savedApplicationId: number | null;
   };
   HandwritingScan: undefined;
+  Paywall: { applicationTypeId: number; applicationName: string } | undefined;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -68,6 +73,23 @@ export default function HomeStack() {
         component={HandwritingScanScreen}
         options={{
           title: 'हस्तलिखित स्कैन',
+          headerBackTitle: 'होम',
+        }}
+      />
+      <Stack.Screen
+        name="Paywall"
+        component={PaywallScreen}
+        options={{
+          title: 'प्रीमियम',
+          headerBackTitle: 'फॉर्म',
+          presentation: 'modal',
+        }}
+      />
+      <Stack.Screen
+        name="CustomApplication"
+        component={CustomApplicationScreen}
+        options={{
+          title: 'खाली आवेदन पत्र',
           headerBackTitle: 'होम',
         }}
       />

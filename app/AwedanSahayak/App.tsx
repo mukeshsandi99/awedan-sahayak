@@ -5,6 +5,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import * as SplashScreen from 'expo-splash-screen';
 import TabNavigator from './src/navigation/TabNavigator';
 import { initDatabase } from './src/database/db';
+import { initIAP, cleanupIAP } from './src/services/iap';
 
 // Keep the splash screen visible while we initialise the database
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -19,6 +20,12 @@ export default function App() {
         console.log('[App] Initializing database...');
         await initDatabase();
         console.log('[App] Database initialized successfully.');
+
+        // Initialize IAP (non-blocking — don't delay app launch for billing)
+        initIAP().catch((err: any) =>
+          console.warn('[App] IAP init failed (non-fatal):', err?.message),
+        );
+
         setDbReady(true);
       } catch (err: any) {
         const msg = err?.message ?? String(err);
@@ -35,6 +42,13 @@ export default function App() {
       await SplashScreen.hideAsync();
     }
   }, [dbReady, dbError]);
+
+  // Cleanup IAP connection on unmount
+  useEffect(() => {
+    return () => {
+      cleanupIAP().catch(() => {});
+    };
+  }, []);
 
   // ── Error state ─────────────────────────────────────────────────
 

@@ -22,6 +22,26 @@ export const API_BASE_URL: string =
   // Production (Render.com):
   'https://awedan-sahayak-api.onrender.com';
 
+// ── Google Play Billing Product IDs ─────────────────────────────────
+//
+// WARNING: These products must be created in Google Play Console before
+// IAP can be tested (even in internal/closed testing tracks).
+//
+//   • awedan_sahayak_monthly_sub  — ₹100/month auto-renewing subscription
+//   • awedan_sahayak_single_gen   — ₹10 one-time consumable (1 generation credit)
+//
+// To create in Play Console:
+//   1. Go to Play Console → Your App → Monetize → Products → Subscriptions
+//   2. Create subscription with product ID: awedan_sahayak_monthly_sub
+//   3. Go to In-App Products → Create with product ID: awedan_sahayak_single_gen
+//   4. Both must be "Active" before react-native-iap can query them
+//
+export const IAP_SKU_MONTHLY = 'awedan_sahayak_monthly_sub';
+export const IAP_SKU_SINGLE = 'awedan_sahayak_single_gen';
+
+/** All IAP SKUs for querying product details from Play Store. */
+export const IAP_SKUS = [IAP_SKU_MONTHLY, IAP_SKU_SINGLE] as const;
+
 // Local development (uncomment below and comment out the production URL above):
 // Platform.select({
 //   android: 'http://localhost:3000',

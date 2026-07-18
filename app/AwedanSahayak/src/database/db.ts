@@ -16,6 +16,7 @@ import {
   GeneratedApplication,
   GeneratedApplicationInsert,
   OfficeType,
+  SubscriptionStatus,
 } from '../types/database';
 import { OFFICE_SEEDS, APPLICATION_TYPE_SEEDS } from './seed';
 
@@ -146,11 +147,24 @@ export async function initDatabase(): Promise<void> {
   // Migration: add accused identification fields to complaint-type applications
   await migrateAccusedFields();
 
+  // Migration: apply targeted field patches to existing application types
+  // (general-purpose mechanism — add entries to FIELD_PATCHES below)
+  await migrateFieldPatches();
+
   // Migration: update verified office data (skipped — offices are generic categories)
   await migrateVerifiedOfficeData();
 
   // Migration: add location + identity columns to user_profile
   await migrateUserProfileFields();
+
+  // Migration: add reminder columns to generated_applications
+  await migrateReminderColumns();
+
+  // Migration: add app_metadata key-value table for monetization tracking
+  await migrateAppMetadataTable();
+
+  // Migration: add custom_office_name column for custom/blank applications
+  await migrateCustomOfficeName();
 
   // Create indexes for common queries
   await db.execAsync(`CREATE INDEX IF NOT EXISTS idx_offices_type ON offices(type);`);
@@ -322,6 +336,128 @@ async function migrateAccusedFields(): Promise<void> {
   }
 }
 
+// ── Targeted field patches ────────────────────────────────────────────
+//
+// GENERAL-PURPOSE MECHANISM for adding new required_fields to EXISTING
+// application_type rows when we modify an existing type (as opposed to
+// adding a brand-new type, which seedIfEmpty handles via insert).
+//
+// To add fields to an existing application type, add an entry below.
+// Each entry is: { name: 'exact name_hindi', add: ['field1','field2'] }
+//
+// The migration reads the current required_fields JSON, adds any missing
+// fields from the patch, and UPDATES the row if anything changed.
+// Safe to call on every app launch — idempotent, checks before writing.
+
+interface FieldPatch {
+  /** Exact match on application_types.name_hindi. */
+  name: string;
+  /** Fields to ensure are present in required_fields. */
+  add: string[];
+}
+
+const FIELD_PATCHES: FieldPatch[] = [
+  // ── CO land types: add khata_number + ancestor fields ────────────
+  {
+    name: 'भूमि नापी आवेदन',
+    add: ['original_owner_name', 'relation_to_owner'],
+  },
+  {
+    name: 'दाखिल-खारिज आवेदन',
+    add: ['original_owner_name', 'relation_to_owner'],
+  },
+  {
+    name: 'परचा आवेदन',
+    add: ['original_owner_name', 'relation_to_owner'],
+  },
+  {
+    name: 'राजस्व रिकॉर्ड सुधार',
+    add: ['khata_number', 'khasra_number', 'original_owner_name', 'relation_to_owner'],
+  },
+  {
+    name: 'अतिक्रमण शिकायत',
+    add: ['khata_number', 'original_owner_name', 'relation_to_owner'],
+  },
+  {
+    name: 'भूमि विवाद आवेदन',
+    add: ['khata_number', 'original_owner_name', 'relation_to_owner'],
+  },
+  {
+    name: 'म्यूटेशन/LPC रोकने हेतु आवेदन',
+    add: ['khasra_number', 'original_owner_name', 'relation_to_owner'],
+  },
+  {
+    name: 'लगान रसीद निर्गत कराने हेतु आवेदन',
+    add: ['khasra_number', 'khata_number', 'original_owner_name', 'relation_to_owner'],
+  },
+  {
+    name: 'LPC निर्गत कराने हेतु आवेदन',
+    add: ['khasra_number', 'khata_number', 'original_owner_name', 'relation_to_owner'],
+  },
+];
+
+/**
+ * Applies FIELD_PATCHES to existing application_type rows.
+ *
+ * For each patch entry, reads the current required_fields JSON,
+ * merges in any missing fields from the patch, and UPDATEs the row
+ * only if the JSON actually changed (idempotent — safe on every launch).
+ */
+async function migrateFieldPatches(): Promise<void> {
+  const database = getDb();
+  console.log('[DB] Checking for field patches to existing application types...');
+
+  let patched = 0;
+
+  try {
+    for (const patch of FIELD_PATCHES) {
+      // Fetch current row
+      const row = await database.getFirstAsync<{ id: number; required_fields: string }>(
+        'SELECT id, required_fields FROM application_types WHERE name_hindi = ?',
+        patch.name,
+      );
+      if (!row) continue; // type doesn't exist yet — seedIfEmpty will create it
+
+      let fields: string[];
+      try {
+        fields = JSON.parse(row.required_fields ?? '[]');
+      } catch {
+        fields = [];
+      }
+      if (!Array.isArray(fields)) fields = [];
+
+      const existing = new Set(fields);
+      let changed = false;
+
+      for (const f of patch.add) {
+        if (!existing.has(f)) {
+          fields.push(f);
+          existing.add(f);
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        await database.runAsync(
+          'UPDATE application_types SET required_fields = ? WHERE id = ?',
+          JSON.stringify(fields),
+          row.id,
+        );
+        patched++;
+        console.log(`[DB] 🔧 Patched "${patch.name}": added [${patch.add.filter((f) => !existing.has(f)).join(', ')}]`);
+      }
+    }
+
+    if (patched > 0) {
+      console.log(`[DB] ✅ Field patches applied to ${patched} application type(s).`);
+    } else {
+      console.log('[DB] Field patches: all types already up-to-date — no changes needed.');
+    }
+  } catch (err: any) {
+    console.warn('[DB] Field patches migration failed (non-fatal):', err?.message);
+  }
+}
+
 /**
  * Updates verified office records with real data from official sources.
  * Run on every launch — idempotent.
@@ -396,6 +532,19 @@ async function seedIfEmpty(): Promise<void> {
  * district, state, parent_spouse_name) to user_profile table for
  * existing installations. Safe to call on every launch — idempotent.
  */
+/** Adds reminder_date, notification_id, and reminder_days columns to generated_applications. */
+async function migrateReminderColumns(): Promise<void> {
+  const database = getDb();
+  console.log('[DB] Checking for reminder columns migration...');
+  try {
+    try { await database.execAsync(`ALTER TABLE generated_applications ADD COLUMN reminder_date TEXT;`); console.log('[DB] ✅ Added reminder_date'); } catch { /* exists */ }
+    try { await database.execAsync(`ALTER TABLE generated_applications ADD COLUMN notification_id TEXT;`); console.log('[DB] ✅ Added notification_id'); } catch { /* exists */ }
+    try { await database.execAsync(`ALTER TABLE generated_applications ADD COLUMN reminder_days INTEGER;`); console.log('[DB] ✅ Added reminder_days'); } catch { /* exists */ }
+  } catch (err: any) {
+    console.warn('[DB] Reminder columns migration warning:', err?.message);
+  }
+}
+
 async function migrateUserProfileFields(): Promise<void> {
   const database = getDb();
   console.log('[DB] Checking for user_profile location columns migration...');
@@ -423,6 +572,77 @@ async function migrateUserProfileFields(): Promise<void> {
   } catch (err: any) {
     console.warn('[DB] user_profile migration warning:', err?.message);
   }
+}
+
+/**
+ * Creates the app_metadata key-value table for monetization tracking
+ * (free usage count, subscription status, paid credits, etc.).
+ * Safe to call on every launch — idempotent.
+ */
+async function migrateAppMetadataTable(): Promise<void> {
+  const database = getDb();
+  console.log('[DB] Checking for app_metadata table migration...');
+  try {
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS app_metadata (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `);
+    console.log('[DB] ✅ app_metadata table ready.');
+  } catch (err: any) {
+    console.warn('[DB] app_metadata migration warning:', err?.message);
+  }
+}
+
+/**
+ * Adds custom_office_name column to generated_applications for
+ * the custom/blank application feature (users can create applications
+ * for any office not covered by the 77+ predefined types).
+ * Safe to call on every launch — idempotent.
+ */
+async function migrateCustomOfficeName(): Promise<void> {
+  const database = getDb();
+  console.log('[DB] Checking for custom_office_name migration...');
+  try {
+    await database.execAsync(`ALTER TABLE generated_applications ADD COLUMN custom_office_name TEXT;`);
+    console.log('[DB] ✅ Added custom_office_name column');
+  } catch {
+    // Column already exists
+  }
+}
+
+// ── App Metadata CRUD (key-value store) ────────────────────────────
+
+/** Get a string value by key. Returns null if key doesn't exist. */
+export async function getMetadata(key: string): Promise<string | null> {
+  const row = await getDb().getFirstAsync<{ value: string }>(
+    'SELECT value FROM app_metadata WHERE key = ?;',
+    key,
+  );
+  return row?.value ?? null;
+}
+
+/** Set a string value for a key. Upserts (insert or replace). */
+export async function setMetadata(key: string, value: string): Promise<void> {
+  await getDb().runAsync(
+    'INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?);',
+    key,
+    value,
+  );
+}
+
+/** Get an integer value by key. Returns 0 if key doesn't exist. */
+export async function getMetadataInt(key: string): Promise<number> {
+  const value = await getMetadata(key);
+  if (value === null) return 0;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Set an integer value for a key. */
+export async function setMetadataInt(key: string, value: number): Promise<void> {
+  await setMetadata(key, String(Math.floor(value)));
 }
 
 // ── Address parser ────────────────────────────────────────────────────
@@ -679,6 +899,10 @@ export interface ApplicationListItem {
   office_type: string | null;
   office_name_hindi: string | null;
   office_name_english: string | null;
+  reminder_date: string | null;
+  notification_id: string | null;
+  reminder_days: number | null;
+  custom_office_name: string | null;
 }
 
 /** Get all generated applications with JOINed type and office names, newest first. */
@@ -687,11 +911,13 @@ export async function getApplicationsWithDetails(): Promise<ApplicationListItem[
     `SELECT
        ga.id, ga.application_type_id, ga.office_id,
        ga.generated_text, ga.pdf_path, ga.created_at,
-       at.name_hindi  AS type_name_hindi,
-       at.name_english AS type_name_english,
-       o.type         AS office_type,
-       o.name_hindi   AS office_name_hindi,
-       o.name_english AS office_name_english
+       ga.reminder_date, ga.notification_id, ga.reminder_days,
+       ga.custom_office_name,
+       COALESCE(at.name_hindi, ga.custom_office_name)  AS type_name_hindi,
+       COALESCE(at.name_english, ga.custom_office_name) AS type_name_english,
+       COALESCE(o.type, 'custom')         AS office_type,
+       COALESCE(o.name_hindi, ga.custom_office_name)   AS office_name_hindi,
+       COALESCE(o.name_english, ga.custom_office_name) AS office_name_english
      FROM generated_applications ga
      LEFT JOIN application_types at ON ga.application_type_id = at.id
      LEFT JOIN offices o ON ga.office_id = o.id
@@ -725,10 +951,14 @@ export async function getEscalationsFor(parentId: number): Promise<GeneratedAppl
 /** Insert a new generated application. */
 export async function insertGeneratedApplication(app: GeneratedApplicationInsert): Promise<GeneratedApplication> {
   const result = await getDb().runAsync(
-    `INSERT INTO generated_applications (application_type_id, office_id, raw_input_text, generated_text, pdf_path, is_escalation_of)
-     VALUES (?, ?, ?, ?, ?, ?);`,
+    `INSERT INTO generated_applications (application_type_id, office_id, raw_input_text, generated_text, pdf_path, is_escalation_of, reminder_date, notification_id, reminder_days, custom_office_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     app.application_type_id, app.office_id, app.raw_input_text,
     app.generated_text, app.pdf_path, app.is_escalation_of,
+    (app as any).reminder_date ?? null,
+    (app as any).notification_id ?? null,
+    (app as any).reminder_days ?? null,
+    (app as any).custom_office_name ?? null,
   );
   return (await getGeneratedApplicationById(result.lastInsertRowId))!;
 }
@@ -742,12 +972,24 @@ export async function updateGeneratedApplication(
   if (!existing) return null;
 
   await getDb().runAsync(
-    `UPDATE generated_applications SET generated_text=?, pdf_path=? WHERE id=?;`,
+    `UPDATE generated_applications SET generated_text=?, pdf_path=?, reminder_date=?, notification_id=?, reminder_days=? WHERE id=?;`,
     fields.generated_text !== undefined ? fields.generated_text : existing.generated_text,
     fields.pdf_path !== undefined ? fields.pdf_path : existing.pdf_path,
+    (fields as any).reminder_date !== undefined ? (fields as any).reminder_date : (existing as any).reminder_date,
+    (fields as any).notification_id !== undefined ? (fields as any).notification_id : (existing as any).notification_id,
+    (fields as any).reminder_days !== undefined ? (fields as any).reminder_days : (existing as any).reminder_days,
     id,
   );
   return getGeneratedApplicationById(id);
+}
+
+/** Cancel a scheduled reminder by clearing its notification fields. */
+export async function cancelReminder(id: number): Promise<boolean> {
+  const result = await getDb().runAsync(
+    `UPDATE generated_applications SET notification_id = NULL WHERE id = ?;`,
+    id,
+  );
+  return (result.changes ?? 0) > 0;
 }
 
 /** Delete a generated application and its escalation chain (orphaned escalations). */

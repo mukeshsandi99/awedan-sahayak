@@ -19,6 +19,7 @@ import type { ApplicationType, UserProfile } from '../types/database';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { API_BASE_URL } from '../config';
+import { canGenerateApplication, incrementFreeUsage, consumePaidCredit } from '../services/usageTracker';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -182,8 +183,10 @@ const FIELD_LABELS: Record<string, string> = {
   cause_of_death: 'मृत्यु का कारण (Cause of Death)',
   hospital_name: 'अस्पताल का नाम (Hospital Name)',
   // ── Land records ─────────────────────────────────────────────
-  khasra_number: 'खसरा नंबर (Khasra Number)',
+  khasra_number: 'खेसरा/प्लॉट नंबर (Khesra/Plot Number)',
   khata_number: 'खाता नंबर (Khata Number)',
+  original_owner_name: 'मूल भूस्वामी/पूर्वज का नाम (Original Landowner/Ancestor Name)',
+  relation_to_owner: 'भूस्वामी से संबंध (Relation to Landowner — e.g. पिता/दादा/परदादा)',
   land_area: 'भूमि क्षेत्रफल (Land Area)',
   land_ownership: 'भूमि स्वामित्व (Land Ownership)',
   measurement_reason: 'नापी का कारण (Reason for Measurement)',
@@ -290,6 +293,7 @@ const FIELD_LABELS: Record<string, string> = {
   balance_settlement: 'शेष राशि निपटान (Balance Settlement)',
   update_details: 'अद्यतन का विवरण (Update Details)',
   loss_reason: 'खोने/क्षति का कारण (Reason for Loss/Damage)',
+  card_type_reason: 'ATM कार्ड का कारण/प्रकार (Card Reason — नया/खोया/क्षतिग्रस्त)',
 
   // ── College / School ─────────────────────────────────────────
   college_name: 'महाविद्यालय का नाम (College Name)',
@@ -362,7 +366,8 @@ const FIELD_LABELS: Record<string, string> = {
   death_date_of_owner: 'मूल स्वामी की मृत्यु तिथि (Original Owner Death Date)',
   plot_number: 'प्लॉट नंबर (Plot Number)',
   mouja_name: 'मौज़ा का नाम (Mouza Name)',
-  purpose_of_lpc: 'LPC/रसीद का प्रयोजन (Purpose of LPC/Receipt)',
+  purpose_of_lpc: 'LPC का प्रयोजन (Purpose of LPC)',
+  purpose_of_receipt: 'लगान रसीद का प्रयोजन (Purpose of Rent Receipt)',
   dispute_description: 'विवाद का कालानुक्रमिक विवरण (Chronological Dispute Description)',
   deceased_father_name: 'मृतक के पिता/पति का नाम (Deceased Father\'s/Husband\'s Name)',
 
@@ -590,6 +595,25 @@ export default function ApplicationFormScreen({ route, navigation }: Props) {
 
   const handleGenerate = async () => {
     if (!allFieldsFilled) return;
+
+    // ── Monetization gate: check if user can generate ──────────────
+    try {
+      const check = await canGenerateApplication();
+      if (!check.allowed) {
+        navigation.navigate('Paywall', {
+          applicationTypeId,
+          applicationName: appType?.name_hindi ?? '',
+        });
+        return;
+      }
+      // Store the reason so we know which counter to increment after success
+      (handleGenerate as any)._generationReason = check.reason;
+    } catch (err) {
+      // If the check itself fails (DB error), log and allow generation
+      console.warn('[Paywall] Gate check error (allowing):', err);
+      (handleGenerate as any)._generationReason = 'free';
+    }
+
     setSubmitting(true);
 
     const payload = {
@@ -636,29 +660,49 @@ export default function ApplicationFormScreen({ route, navigation }: Props) {
       console.log(`[ApplicationForm] Generated ${result.generatedText.length} chars via ${result.metadata?.provider}/${result.metadata?.model}`);
 
       // Save to local SQLite for history
+      let savedAppId: number | null = null;
       try {
-        await insertGeneratedApplication({
+        const saved = await insertGeneratedApplication({
           application_type_id: applicationTypeId,
           office_id: null,
           raw_input_text: JSON.stringify(formData),
           generated_text: result.generatedText,
           pdf_path: null,
           is_escalation_of: null,
-        });
-        console.log('[ApplicationForm] Saved to generated_applications table.');
+          reminder_date: null,
+          notification_id: null,
+          reminder_days: null,
+        } as any);
+        savedAppId = (saved as any).id ?? null;
+        console.log('[ApplicationForm] Saved to generated_applications table, id:', savedAppId);
       } catch (dbErr: any) {
         console.error('[ApplicationForm] Failed to save to DB:', dbErr?.message);
-        // Non-fatal — the generated text is still available on screen
+      }
+
+      // ── Increment usage counter after successful generation ─────
+      const reason: string = (handleGenerate as any)._generationReason ?? 'free';
+      try {
+        if (reason === 'free') {
+          await incrementFreeUsage();
+          console.log('[Paywall] Incremented free usage count.');
+        } else if (reason === 'paid_credit') {
+          await consumePaidCredit();
+          console.log('[Paywall] Consumed 1 paid credit.');
+        }
+        // 'subscribed' — no counter to increment
+      } catch (counterErr: any) {
+        console.warn('[Paywall] Failed to increment usage counter:', counterErr?.message);
       }
 
       setSubmitting(false);
 
-      // Navigate to preview screen
+      // Navigate to preview screen (pass savedAppId for reminder scheduling)
       navigation.navigate('ApplicationPreview', {
         applicationName: payload.application_name,
         generatedText: result.generatedText,
         officeType: payload.office_type,
         applicationTypeId,
+        savedApplicationId: savedAppId,
       });
     } catch (err: any) {
       setSubmitting(false);

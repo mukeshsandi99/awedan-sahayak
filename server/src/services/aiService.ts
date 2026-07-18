@@ -134,6 +134,7 @@ const DESIGNATIONS: Record<string, string> = {
   pwd: 'कार्यपालक अभियंता महोदय',
   rcd: 'कार्यपालक अभियंता महोदय',
   bcd: 'कार्यपालक अभियंता महोदय',
+  custom: 'संबंधित अधिकारी महोदय',
 };
 
 /** Jurisdictional unit label for each office type — used in header, body, and footer. */
@@ -152,6 +153,7 @@ const LOCATION_LABEL: Record<string, string> = {
   pwd: 'मंडल',
   rcd: 'मंडल',
   bcd: 'मंडल',
+  custom: 'कार्यालय',
 };
 
 // ── System prompt builder ───────────────────────────────────────────
@@ -234,6 +236,100 @@ ${locLabel}–{{police_station_or_block}},
 
 ## आवेदन का प्रकार
 यह आवेदन "${applicationName}" प्रकार का है। कार्यालय प्रकार: ${officeType}।
+संबोधन हेतु उपयुक्त पदनाम: ${designation}।
+
+कोई मार्कडाउन फॉर्मेटिंग (जैसे ** या __) का उपयोग न करें, केवल सादा टेक्स्ट में उत्तर दें।
+
+उपरोक्त सभी नियमों का पालन करते हुए, नीचे दिए गए फॉर्म डेटा के आधार पर एक संपूर्ण, औपचारिक, हिंदी आवेदन पत्र तैयार करें। केवल आवेदन पत्र का पाठ दें, कोई अन्य टिप्पणी या व्याख्या नहीं।`;
+}
+
+/**
+ * Builds a dynamic system prompt for the custom/blank application mode.
+ * Unlike buildSystemPrompt(), the designation and location label come
+ * from user-provided free text rather than predefined office-type maps.
+ *
+ * @param officeName            Free-text office name, e.g. "जिला कल्याण पदाधिकारी"
+ * @param recipientDesignation  Optional free-text designation, e.g. "महोदय"
+ */
+export function buildCustomSystemPrompt(
+  officeName: string,
+  recipientDesignation?: string | null,
+): string {
+  const designation = recipientDesignation?.trim()
+    ? `${recipientDesignation.trim()} महोदय`
+    : 'संबंधित अधिकारी महोदय';
+
+  const officeForHeader = officeName.trim();
+
+  return `आप एक अनुभवी सरकारी आवेदन पत्र लेखक (Government Application Draftsman) हैं। आपका कार्य भारतीय नागरिकों के लिए औपचारिक हिंदी में किसी भी सरकारी कार्यालय हेतु आवेदन पत्र (प्रार्थना पत्र) तैयार करना है।
+
+## महत्वपूर्ण नियम (CRITICAL RULES)
+
+आपको निम्नलिखित 7-भाग संरचना का सख्ती से पालन करना है। नीचे {{double_curly_braces}} में दिए गए प्रत्येक placeholder को आपको उपयोगकर्ता के फॉर्म डेटा से वास्तविक मानों से बदलना अनिवार्य है। कोई भी {{placeholder}} raw नहीं छोड़ना है। यदि कोई मान उपलब्ध न हो, तो "............." लिखें।
+
+### भाग 1: हैडर (सेवा में)
+सेवा में,
+${designation},
+${officeForHeader},
+जिला–{{district}},
+राज्य–{{state}}।
+
+### भाग 2: विषय (Subject)
+"विषय:" से प्रारंभ करें। उपयोगकर्ता द्वारा बताई गई समस्या और अनुरोधित कार्रवाई दोनों का एक पूर्ण वाक्य में सारांश दें।
+
+### भाग 3: प्रारंभिक कथन
+"महोदय," के बाद नई पंक्ति में लिखें:
+"सविनय निवेदन है कि मैं {{name}}, {{parent_name}}, ग्राम–{{village}}, कार्यालय–{{police_station_or_block}}, जिला–{{district}} की निवासी/का निवासी हूँ।"
+निवासी (पुरुष) या निवासिन (महिला) का चयन आवेदक के लिंग के अनुसार करें।
+
+### भाग 4: घटना विवरण (Narrative Body — सबसे महत्वपूर्ण)
+- बुलेट पॉइंट या नंबर का उपयोग न करें
+- पूर्ण वर्णनात्मक अनुच्छेद लिखें जो उपयोगकर्ता द्वारा बताई गई समस्या का कालानुक्रमिक विवरण दे
+- प्रत्येक व्यक्ति का पहली बार उल्लेख करते समय उसका पूरा नाम, पिता/पति का नाम और गाँव अवश्य लिखें
+- तिथियाँ, समय और स्थान का उल्लेख कथा के भीतर स्वाभाविक रूप से करें
+- "प्रार्थी", "उक्त", "अभियुक्तगण", "संलग्न" जैसे औपचारिक विधिक शब्दों का प्रयोग करें
+- केवल प्रदान किए गए तथ्यों का वर्णन करें, कोई नई जानकारी न गढ़ें
+- लगभग 200-400 शब्दों का एक प्रवाहमय अनुच्छेद लिखें
+- **महत्वपूर्ण**: उपयोगकर्ता ने "custom_description" फील्ड में अपनी पूरी समस्या/अनुरोध अपने शब्दों में लिखा है। उपयोगकर्ता ने बातचीत के अंदाज में या अव्यवस्थित तरीके से जानकारी दी हो सकती है — आपको उसे एक सुसंगत, औपचारिक, कालानुक्रमिक नैरेटिव में व्यवस्थित करना है। कोई नई जानकारी न गढ़ें, केवल दी गई जानकारी का पुनर्गठन करें।
+
+### भाग 5: समापन अनुरोध
+"अतः श्रीमान/महोदय से सविनय/विनम्र निवेदन है कि..." से प्रारंभ करें। स्पष्ट, विशिष्ट और कार्रवाई योग्य अनुरोध करें। "की जाए", "किया जाए", "प्रदान किया जाए" जैसे औपचारिक क्रिया रूपों का प्रयोग करें। अनुरोध उपयोगकर्ता द्वारा बताई गई समस्या के अनुरूप होना चाहिए।
+
+### भाग 6: आभार
+"इसके लिए मैं सदैव {{gender_gratitude_term}} रहूँगा/रहूँगी।"
+
+### भाग 7: पाद लेख (Footer)
+दिनांक: {{date}}
+स्थान: {{place}}
+
+                            {{valediction}},
+
+                            {{applicant_name}}
+                            {{parent_name}}
+                            ग्राम–{{village}},
+                            कार्यालय–{{police_station_or_block}},
+                            जिला–{{district}}
+                            मोबाइल: {{applicant_phone}}
+
+## लिंग-आधारित व्याकरण (Gender-Aware Grammar)
+
+आवेदक के लिंग (पुरुष/महिला/अन्य) के अनुसार ये शब्द बदलें:
+- पुरुष → निवासी, भवदीय, रहूँगा, था, आपका आभारी, मेरा
+- महिला → निवासिन, भवदीया, रहूँगी, थी, आपकी आभारी, मेरी
+- अन्य → प्रार्थी (लिंग-तटस्थ), निवासी, भवदीय, रहेगा
+
+## नैरेटिव गुणवत्ता नियम
+
+1. **संश्लेषण करें, सूची न बनाएं** — फॉर्म के अलग-अलग फील्ड से जानकारी लेकर एक प्रवाहमय कथा अनुच्छेद बनाएं
+2. **पूर्ण पहचान** — प्रत्येक व्यक्ति का उल्लेख करते समय नाम + पिता/पति का नाम + गाँव दें
+3. **औपचारिक विधिक शब्दावली** — प्रार्थी, उक्त, उपरोक्त, अभियुक्तगण, संलग्न, प्रेषित
+4. **पूर्ण वाक्य** — कोई खंडित वाक्य या बुलेट पॉइंट नहीं
+5. **सम्मानजनक स्वर** — प्राधिकार के प्रति सम्मान, तथ्यात्मक, उचित तात्कालिकता के साथ
+6. **तथ्य न गढ़ें** — केवल प्रदान की गई जानकारी का वर्णन करें। कोई जानकारी उपलब्ध न हो तो उसे छोड़ दें, अनुमान न लगाएं
+7. **{{placeholders}} का सही प्रयोग** — भाग 1, 3, 6 और 7 में दिए गए सभी {{placeholders}} को अपने आउटपुट में ठीक वैसे ही शामिल करें जैसे वे लिखे हैं। इन्हें बदलें नहीं — ये स्वचालित रूप से सही मानों से बदल दिए जाएँगे।
+
+## कार्यालय की जानकारी
+यह आवेदन "${officeName}" कार्यालय के लिए है।
 संबोधन हेतु उपयुक्त पदनाम: ${designation}।
 
 कोई मार्कडाउन फॉर्मेटिंग (जैसे ** या __) का उपयोग न करें, केवल सादा टेक्स्ट में उत्तर दें।
@@ -326,6 +422,7 @@ const OFFICE_NAMES: Record<string, string> = {
   sp: 'पुलिस अधीक्षक',
   dc: 'जिलाधिकारी/जिला दंडाधिकारी',
   court: 'माननीय न्यायाधीश',
+  custom: 'उपयोगकर्ता द्वारा निर्दिष्ट कार्यालय',
 };
 
 // ── Post-generation interpolation ───────────────────────────────────
@@ -542,6 +639,129 @@ export async function draftApplication(
     const status = err?.status ?? 'unknown';
     const message = err?.error?.message ?? err?.message ?? String(err);
     console.error(`[AIService] API error (${status}): ${message}`);
+    throw new Error(
+      `AI provider error (${config.provider}, HTTP ${status}): ${message}`,
+    );
+  }
+}
+
+// ── Custom application drafting ─────────────────────────────────────────
+
+export interface CustomApplicationDraftRequest {
+  /** Free-text office name (e.g. "जिला कल्याण पदाधिकारी"). */
+  officeName: string;
+  /** Optional free-text recipient designation. */
+  recipientDesignation?: string | null;
+  /** Key-value form data (identity fields + custom_description). */
+  formData: Record<string, string>;
+}
+
+/**
+ * Drafts a custom/blank application using a dynamically-built system prompt.
+ * Takes user-provided office name and designation instead of looking them up
+ * from predefined office-type maps. Still applies the full 7-part structure
+ * and gender-aware grammar.
+ */
+export async function draftCustomApplication(
+  request: CustomApplicationDraftRequest,
+): Promise<ApplicationDraftResponse> {
+  const { officeName, recipientDesignation, formData } = request;
+  const config = getActiveConfig();
+
+  const systemPrompt = buildCustomSystemPrompt(officeName, recipientDesignation ?? null);
+
+  // Build user message: append ALL form data so the AI can see every value
+  const applicantInfoLines: string[] = [];
+  for (const [key, value] of Object.entries(formData)) {
+    if (value && value.trim().length > 0) {
+      applicantInfoLines.push(`${key}: ${value.trim()}`);
+    }
+  }
+  const applicantInfoBlock = applicantInfoLines.length > 0
+    ? `\n\n─── प्रार्थी की संपूर्ण जानकारी (Applicant's Complete Information) ───\n${applicantInfoLines.join('\n')}`
+    : '';
+
+  const userMessage = `कृपया निम्नलिखित जानकारी के आधार पर एक औपचारिक हिंदी आवेदन पत्र तैयार करें:\n\nनोट: "custom_description" फील्ड में उपयोगकर्ता ने अपनी पूरी समस्या/अनुरोध अपने शब्दों में लिखा है। इसी के आधार पर नैरेटिव (भाग 4) और समापन अनुरोध (भाग 5) तैयार करें।${applicantInfoBlock}`;
+
+  console.log(`[AIService] Drafting custom application with ${config.provider} (${config.model})...`);
+  console.log(`[AIService] Office: ${officeName}, Designation: ${recipientDesignation ?? '(not provided)'}`);
+  console.log(`[AIService] Custom system prompt: ${systemPrompt.length} chars`);
+  console.log(`[AIService] User message: ${userMessage.length} chars`);
+
+  // Dynamically import the Anthropic SDK
+  let Anthropic: any;
+  try {
+    const sdk = await import('@anthropic-ai/sdk');
+    Anthropic = sdk.default ?? sdk.Anthropic;
+  } catch {
+    throw new Error(
+      '@anthropic-ai/sdk is not installed. Run: npm install @anthropic-ai/sdk',
+    );
+  }
+
+  const client = new Anthropic({
+    apiKey: config.apiKey,
+    ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+  });
+
+  try {
+    const response = await client.messages.create({
+      model: config.model,
+      max_tokens: 4000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+    });
+
+    let text: string;
+    if (typeof response.content === 'string') {
+      text = response.content;
+    } else if (Array.isArray(response.content)) {
+      text = response.content
+        .filter((block: any) => block.type === 'text')
+        .map((block: any) => block.text)
+        .join('\n');
+    } else {
+      text = '';
+    }
+
+    // Safety net: strip any residual markdown bold/italic markers
+    text = text.replace(/\*\*/g, '').replace(/__/g, '');
+
+    console.log(`[AIService] Custom AI generated ${text.length} chars.`);
+
+    // Post-generation interpolation using 'custom' office type
+    const postResult = postInterpolate(text, formData, 'custom');
+    text = postResult.text;
+
+    if (postResult.unresolved.length > 0) {
+      console.warn(
+        `[AIService] ⚠️ ${postResult.unresolved.length} placeholder(s) unresolved in custom output:`,
+        postResult.unresolved,
+      );
+    }
+
+    const remaining = validateNoPlaceholders(text);
+    if (remaining.length > 0) {
+      console.warn(
+        '[AIService] ⚠️ Final custom output still contains unresolved placeholders.',
+      );
+    }
+
+    console.log(`[AIService] Final custom output: ${text.length} chars.`);
+
+    return {
+      generatedText: text,
+      provider: config.provider,
+      model: config.model,
+      usage: response.usage ? {
+        inputTokens: response.usage.input_tokens ?? 0,
+        outputTokens: response.usage.output_tokens ?? 0,
+      } : undefined,
+    };
+  } catch (err: any) {
+    const status = err?.status ?? 'unknown';
+    const message = err?.error?.message ?? err?.message ?? String(err);
+    console.error(`[AIService] Custom API error (${status}): ${message}`);
     throw new Error(
       `AI provider error (${config.provider}, HTTP ${status}): ${message}`,
     );

@@ -561,71 +561,79 @@ export const APPLICATION_TYPE_SEEDS: ApplicationTypeInsert[] = [
   },
 
   // ═══════════════════════════════════════════════════════════════════
-  // CO (Circle Officer) — 8 types
+  // CO (Circle Officer) — 9 types
   // ═══════════════════════════════════════════════════════════════════
 
   {
     office_type: 'co', name_hindi: 'भूमि नापी आवेदन', name_english: 'Land Measurement Request',
     keywords: JSON.stringify(['भूमि','land','नापी','measurement','सर्वे','survey','पैमाइश']),
-    required_fields: withBase(['khasra_number','khata_number','village','land_area','measurement_reason','boundary_dispute',G]),
+    required_fields: withBase(['khasra_number','khata_number','village','land_area','measurement_reason','boundary_dispute','original_owner_name','relation_to_owner',G]),
     prompt_template: pa('co', 'भूमि नापी आवेदन',
-      'खसरा नंबर, खाता नंबर, गाँव और भूमि का क्षेत्रफल बताएं। नापी क्यों आवश्यक है (खरीद-बिक्री, विवाद, बंटवारा, निर्माण आदि) कारण दें। सीमा विवाद हो तो पड़ोसी भू-स्वामियों का विवरण दें। राजस्व निरीक्षक/अमीन द्वारा स्थलीय नापी कराने का अनुरोध करें।'),
+      'खसरा नंबर, खाता नंबर, गाँव और भूमि का क्षेत्रफल बताएं। यदि भूमि आवेदक के पूर्वज (दादा/परदादा/पिता) के नाम पर दर्ज है, तो original_owner_name और relation_to_owner फील्ड का उपयोग करके "उक्त भूमि मेरे [relation_to_owner] स्व. [original_owner_name] के नाम पर दर्ज है, जिनका मैं वंशज/उत्तराधिकारी हूँ" लिखें। नापी क्यों आवश्यक है (खरीद-बिक्री, विवाद, बंटवारा, निर्माण आदि) कारण दें। सीमा विवाद हो तो पड़ोसी भू-स्वामियों का विवरण दें। राजस्व निरीक्षक/अमीन द्वारा स्थलीय नापी कराने का अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
   {
     office_type: 'co', name_hindi: 'दाखिल-खारिज आवेदन', name_english: 'Mutation Application',
     keywords: JSON.stringify(['दाखिल','खारिज','mutation','नामांतरण','transfer','विरासत','succession']),
-    required_fields: withBase(['khasra_number','khata_number','village','mutation_reason','previous_owner','new_owner','succession_document','death_date_of_owner',G]),
+    required_fields: withBase(['khasra_number','khata_number','village','mutation_reason','previous_owner','new_owner','succession_document','death_date_of_owner','original_owner_name','relation_to_owner',G]),
     prompt_template: pa('co', 'दाखिल-खारिज आवेदन',
-      'खसरा नंबर, खाता नंबर और गाँव का उल्लेख करें। नामांतरण का कारण (विरासत, खरीद-बिक्री, बंटवारा, बैनामा) बताएं। पूर्व स्वामी और नए स्वामी का पूरा विवरण एवं संबंध दें। विरासत होने पर मृतक की मृत्यु तिथि और उत्तराधिकार प्रमाण पत्र का उल्लेख करें। राजस्व अभिलेखों में नाम दर्ज/खारिज करने का अनुरोध करें।'),
+      'खसरा नंबर, खाता नंबर और गाँव का उल्लेख करें। नामांतरण का कारण (विरासत, खरीद-बिक्री, बंटवारा, बैनामा) बताएं। यदि भूमि किसी पूर्वज (दादा/परदादा) के नाम पर है और आवेदक उत्तराधिकारी के रूप में नामांतरण चाहता है, तो original_owner_name और relation_to_owner का उपयोग करें — "उक्त भूमि मेरे [relation_to_owner] स्व. [original_owner_name] के नाम पर दर्ज है, जिनके वंशज/उत्तराधिकारी के रूप में मैं नामांतरण हेतु आवेदन कर रहा/रही हूँ"। पूर्व स्वामी और नए स्वामी का पूरा विवरण एवं संबंध दें। विरासत होने पर मृतक की मृत्यु तिथि और उत्तराधिकार प्रमाण पत्र का उल्लेख करें। राजस्व अभिलेखों में नाम दर्ज/खारिज करने का अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
   {
     office_type: 'co', name_hindi: 'परचा आवेदन', name_english: 'Parcha Application (Land Record Extract)',
     keywords: JSON.stringify(['परचा','parcha','खतौनी','Khasra-Khatauni','अभिलेख','record']),
-    required_fields: withBase(['khasra_number','khata_number','village','record_type','purpose','year',G]),
+    required_fields: withBase(['khasra_number','khata_number','village','record_type','purpose','year','original_owner_name','relation_to_owner',G]),
     prompt_template: pa('co', 'परचा आवेदन',
-      'खसरा नंबर, खाता नंबर, गाँव और फसल वर्ष बताएं। किस प्रकार का अभिलेख (खतौनी की नकल, Khasra-Panchsala, नक्शा आदि) और किस प्रयोजन (बैंक ऋण, कोर्ट केस, फसल बीमा आदि) हेतु चाहिए बताएं। निर्धारित शुल्क के साथ अभिलेख की प्रति उपलब्ध कराने का अनुरोध करें।'),
+      'खसरा नंबर, खाता नंबर, गाँव और फसल वर्ष बताएं। यदि भूमि आवेदक के पूर्वज (दादा/परदादा/पिता) के नाम पर दर्ज है, तो original_owner_name और relation_to_owner का उपयोग करें। किस प्रकार का अभिलेख (खतौनी की नकल, Khasra-Panchsala, नक्शा आदि) और किस प्रयोजन (बैंक ऋण, कोर्ट केस, फसल बीमा आदि) हेतु चाहिए बताएं। निर्धारित शुल्क के साथ अभिलेख की प्रति उपलब्ध कराने का अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
   {
     office_type: 'co', name_hindi: 'राजस्व रिकॉर्ड सुधार', name_english: 'Revenue Record Correction',
     keywords: JSON.stringify(['राजस्व','revenue','रिकॉर्ड','record','सुधार','correction']),
-    required_fields: withBase(['khasra_number','khata_number','village','error_description','correct_info','supporting_documents',G]),
+    required_fields: withBase(['khasra_number','khata_number','village','error_description','correct_info','supporting_documents','original_owner_name','relation_to_owner',G]),
     prompt_template: pa('co', 'राजस्व रिकॉर्ड सुधार',
-      'राजस्व अभिलेखों में क्या त्रुटि है (नाम की वर्तनी, क्षेत्रफल, फसल, सीमांकन आदि) इसका सटीक विवरण दें। गलत और सही जानकारी दोनों लिखें। त्रुटि के प्रमाण हेतु संलग्न दस्तावेज़ों का उल्लेख करें। अभिलेखों में सुधार करने का अनुरोध करें।'),
+      'राजस्व अभिलेखों में क्या त्रुटि है (नाम की वर्तनी, क्षेत्रफल, फसल, सीमांकन, पूर्वज का नाम आदि) इसका सटीक विवरण दें। यदि भूमि किसी पूर्वज के नाम पर है और original_owner_name तथा relation_to_owner दिया गया है, तो इसका उल्लेख करें। गलत और सही जानकारी दोनों लिखें। त्रुटि के प्रमाण हेतु संलग्न दस्तावेज़ों का उल्लेख करें। अभिलेखों में सुधार करने का अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
   {
     office_type: 'co', name_hindi: 'अतिक्रमण शिकायत', name_english: 'Encroachment Complaint',
     keywords: JSON.stringify(['अतिक्रमण','encroachment','कब्जा','occupation','अवैध','illegal']),
-    required_fields: withBase(['khasra_number','village','encroacher_name','encroacher_father_name','encroacher_village','encroachment_details','since_when','previous_complaints','encroachment_area',G]),
+    required_fields: withBase(['khasra_number','khata_number','village','encroacher_name','encroacher_father_name','encroacher_village','encroachment_details','since_when','previous_complaints','encroachment_area','original_owner_name','relation_to_owner',G]),
     prompt_template: p('co', 'अतिक्रमण शिकायत',
-      'अतिक्रमण की गई भूमि का खसरा नंबर, गाँव और क्षेत्रफल बताएं। अतिक्रमणकर्ता की पूरी पहचान दें: पूरा नाम, पिता/पति का नाम (encroacher_father_name) और गाँव (encroacher_village) — प्रारूप में "[नाम], पिता/पति [पिता/पति का नाम], ग्राम [गाँव], थाना [थाना], जिला [जिला]"। कब से अतिक्रमण है और किस प्रकार का अतिक्रमण है इसका विस्तृत विवरण दें। पूर्व की शिकायतों का उल्लेख करें। भूमि को अतिक्रमण मुक्त कराने, बेदखली और विधिक कार्रवाई का अनुरोध करें।'),
+      'अतिक्रमण की गई भूमि का खसरा नंबर, खाता नंबर, गाँव और क्षेत्रफल बताएं। यदि भूमि आवेदक के पूर्वज (दादा/परदादा/पिता) के नाम पर दर्ज है, तो original_owner_name और relation_to_owner का उपयोग करके "उक्त भूमि मेरे [relation_to_owner] स्व. [original_owner_name] के नाम पर दर्ज है" लिखें। अतिक्रमणकर्ता की पूरी पहचान दें: पूरा नाम, पिता/पति का नाम (encroacher_father_name) और गाँव (encroacher_village) — प्रारूप में "[नाम], पिता/पति [पिता/पति का नाम], ग्राम [गाँव], थाना [थाना], जिला [जिला]"। कब से अतिक्रमण है और किस प्रकार का अतिक्रमण है इसका विस्तृत विवरण दें। पूर्व की शिकायतों का उल्लेख करें। भूमि को अतिक्रमण मुक्त कराने, बेदखली और विधिक कार्रवाई का अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
   {
     office_type: 'co', name_hindi: 'भूमि विवाद आवेदन', name_english: 'Land Dispute Application',
     keywords: JSON.stringify(['भूमि','land','विवाद','dispute','सीमा','boundary','बंटवारा','partition']),
-    required_fields: withBase(['khasra_number','village','dispute_type','opposing_party','opposing_party_father_name','opposing_party_village','dispute_details','claim_basis','evidence_documents',G]),
+    required_fields: withBase(['khasra_number','khata_number','village','dispute_type','opposing_party','opposing_party_father_name','opposing_party_village','dispute_details','claim_basis','evidence_documents','original_owner_name','relation_to_owner',G]),
     prompt_template: p('co', 'भूमि विवाद आवेदन',
-      'भूमि का खसरा नंबर, गाँव और विवाद का प्रकार (सीमा विवाद, स्वामित्व विवाद, बंटवारा, रास्ता विवाद आदि) बताएं। विपक्षी पक्ष की पूरी पहचान दें: पूरा नाम, पिता/पति का नाम (opposing_party_father_name) और गाँव (opposing_party_village) — प्रारूप में "[नाम], पिता/पति [पिता/पति का नाम], ग्राम [गाँव], थाना [थाना], जिला [जिला]"। विवाद का विस्तृत कालानुक्रमिक विवरण और अपने दावे का आधार बताएं। राजस्व अधिकारी से स्थलीय निरीक्षण कर विवाद निराकरण का अनुरोध करें।'),
+      'भूमि का खसरा नंबर, खाता नंबर, गाँव और विवाद का प्रकार (सीमा विवाद, स्वामित्व विवाद, बंटवारा, रास्ता विवाद आदि) बताएं। यदि भूमि आवेदक के पूर्वज (दादा/परदादा/पिता) के नाम पर दर्ज है, तो original_owner_name और relation_to_owner फील्ड का उपयोग करें — "उक्त भूमि मेरे दादा स्व. XYZ के नाम पर दर्ज है, जिनका मैं वंशज हूँ"। विपक्षी पक्ष की पूरी पहचान दें: पूरा नाम, पिता/पति का नाम (opposing_party_father_name) और गाँव (opposing_party_village) — प्रारूप में "[नाम], पिता/पति [पिता/पति का नाम], ग्राम [गाँव], थाना [थाना], जिला [जिला]"। विवाद का विस्तृत कालानुक्रमिक विवरण और अपने दावे का आधार बताएं। राजस्व अधिकारी से स्थलीय निरीक्षण कर विवाद निराकरण का अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
   {
     office_type: 'co', name_hindi: 'म्यूटेशन/LPC रोकने हेतु आवेदन', name_english: 'Application to Stop Mutation/LPC',
     keywords: JSON.stringify(['म्यूटेशन','mutation','LPC','रोकना','stop','stay','जांच','inquiry','मापी','survey','मौतेसन','बंटवारा','partition','दाखिल-खारिज','विवाद','dispute','खसरा','खतौनी']),
-    required_fields: withBase(['applicant_name','father_husband_name','village','post','thana','district','khata_number','plot_number','mouja_name','opposing_party_name','opposing_party_father_name','opposing_party_village','dispute_description',G]),
+    required_fields: withBase(['applicant_name','father_husband_name','village','post','thana','district','khata_number','khasra_number','mouja_name','opposing_party_name','opposing_party_father_name','opposing_party_village','dispute_description','original_owner_name','relation_to_owner',G]),
     prompt_template: p('co', 'म्यूटेशन/LPC रोकने हेतु आवेदन',
-      'यह आवेदन किसी विवादित भूमि के म्यूटेशन (दाखिल-खारिज/नामांतरण) या LPC (Land Possession Certificate) जारी करने पर रोक लगाने हेतु है। खसरा/खाता नंबर, प्लॉट नंबर और मौजा का पूरा विवरण दें। विपक्षी पक्ष का पूरा नाम, पिता/पति का नाम और गाँव स्पष्ट रूप से बताएं। भूमि विवाद का विस्तृत कालानुक्रमिक वर्णन करें — विवाद कब और क्यों शुरू हुआ, अब तक क्या कार्रवाई हुई, और वर्तमान में मामला किस स्तर पर है। यदि मामला SDO/उच्च न्यायालय/राजस्व बोर्ड में विचाराधीन है तो उसका केस नंबर और वर्तमान स्थिति अवश्य बताएं। उल्लेख करें कि जांच पूर्ण होने तक या विवाद का अंतिम निपटारा होने तक म्यूटेशन/LPC/किसी भी प्रकार का भूमि अंतरण रोका जाए। राजस्व अधिकारी से निष्पक्ष जांच कर यथास्थिति बनाए रखने का अनुरोध करें।'),
+      'यह आवेदन किसी विवादित भूमि के म्यूटेशन (दाखिल-खारिज/नामांतरण) या LPC (Land Possession Certificate) जारी करने पर रोक लगाने हेतु है। खसरा/प्लॉट नंबर, खाता नंबर और मौजा का पूरा विवरण दें। यदि भूमि आवेदक के पूर्वज (दादा/परदादा/पिता) के नाम पर दर्ज है, तो original_owner_name और relation_to_owner का उपयोग करें। विपक्षी पक्ष का पूरा नाम, पिता/पति का नाम और गाँव स्पष्ट रूप से बताएं। भूमि विवाद का विस्तृत कालानुक्रमिक वर्णन करें — विवाद कब और क्यों शुरू हुआ, अब तक क्या कार्रवाई हुई, और वर्तमान में मामला किस स्तर पर है। यदि मामला SDO/उच्च न्यायालय/राजस्व बोर्ड में विचाराधीन है तो उसका केस नंबर और वर्तमान स्थिति अवश्य बताएं। उल्लेख करें कि जांच पूर्ण होने तक या विवाद का अंतिम निपटारा होने तक म्यूटेशन/LPC/किसी भी प्रकार का भूमि अंतरण रोका जाए। राजस्व अधिकारी से निष्पक्ष जांच कर यथास्थिति बनाए रखने का अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
   {
-    office_type: 'co', name_hindi: 'रसीद/LPC निर्गत कराने हेतु आवेदन', name_english: 'Application to Issue Receipt/LPC',
-    keywords: JSON.stringify(['रसीद','receipt','LPC','Land Possession Certificate','एलपीसी','निर्गत','issue','खतौनी','परचा','parcha','खसरा','भूमि','लगान रसीद','rent receipt','दाखिल-खारिज']),
-    required_fields: withBase(['applicant_name','father_husband_name','village','post','thana','district','khata_number','plot_number','mouja_name','purpose_of_lpc',G]),
-    prompt_template: pa('co', 'रसीद/LPC निर्गत कराने हेतु आवेदन',
-      'यह आवेदन अपनी स्वयं की भूमि का लगान रसीद (Rent Receipt) या LPC (Land Possession Certificate/भूमि कब्जा प्रमाण पत्र) निर्गत कराने हेतु है। खसरा नंबर, खाता नंबर, प्लॉट नंबर और मौजा (मौज़ा) का पूरा विवरण दें। LPC/रसीद किस प्रयोजन हेतु चाहिए (बैंक ऋण, फसल बीमा, सरकारी योजना का लाभ, कोर्ट में प्रस्तुति, क्रय-विक्रय, शपथ पत्र संलग्नक आदि) इसका स्पष्ट उल्लेख करें। आवेदक उक्त भूमि का कानूनी स्वामी/कब्जाधारी है इसका उल्लेख करें और यदि पूर्व में कोई LPC/रसीद निर्गत हुई है तो उसका विवरण दें। राजस्व अभिलेखों की जांच कर नियमानुसार शीघ्र LPC/रसीद निर्गत करने का विनम्र अनुरोध करें।'),
+    office_type: 'co', name_hindi: 'लगान रसीद निर्गत कराने हेतु आवेदन', name_english: 'Application to Issue Rent Receipt (Lagaan Rasid)',
+    keywords: JSON.stringify(['रसीद','receipt','लगान','rent','लगान रसीद','rent receipt','भूमि कर','land tax','राजस्व रसीद']),
+    required_fields: withBase(['khasra_number','khata_number','mouja_name','purpose_of_receipt','original_owner_name','relation_to_owner',G]),
+    prompt_template: pa('co', 'लगान रसीद निर्गत कराने हेतु आवेदन',
+      'यह आवेदन अपनी भूमि का लगान रसीद (Rent Receipt / भू-राजस्व रसीद) निर्गत कराने हेतु है। खसरा/प्लॉट नंबर, खाता नंबर और मौजा (मौज़ा) का पूरा विवरण दें। यदि भूमि आवेदक के पूर्वज (दादा/परदादा/पिता) के नाम पर दर्ज है, तो original_owner_name और relation_to_owner फील्ड का उपयोग करें — उदाहरण: "उक्त भूमि मेरे दादा स्व. XYZ के नाम पर दर्ज है, जिनका मैं वंशज/उत्तराधिकारी हूँ"। यदि भूमि आवेदक के स्वयं के नाम पर है तो इन फील्ड्स को छोड़ दें। लगान रसीद किस प्रयोजन हेतु चाहिए (बैंक ऋण, फसल बीमा, सरकारी योजना का लाभ, कोर्ट में प्रस्तुति आदि) इसका स्पष्ट उल्लेख करें। नियमानुसार शीघ्र लगान रसीद निर्गत करने का विनम्र अनुरोध करें।'),
+    requires_legal_disclaimer: 0, disclaimer_text: null,
+  },
+  {
+    office_type: 'co', name_hindi: 'LPC निर्गत कराने हेतु आवेदन', name_english: 'Application to Issue Land Possession Certificate (LPC)',
+    keywords: JSON.stringify(['LPC','Land Possession Certificate','एलपीसी','भूमि कब्जा','कब्जा प्रमाण पत्र','possession','भू-स्वामित्व']),
+    required_fields: withBase(['khasra_number','khata_number','mouja_name','purpose_of_lpc','original_owner_name','relation_to_owner',G]),
+    prompt_template: pa('co', 'LPC निर्गत कराने हेतु आवेदन',
+      'यह आवेदन LPC (Land Possession Certificate / भूमि कब्जा प्रमाण पत्र) निर्गत कराने हेतु है। खसरा/प्लॉट नंबर, खाता नंबर और मौजा (मौज़ा) का पूरा विवरण दें। यदि भूमि आवेदक के पूर्वज (दादा/परदादा/पिता) के नाम पर दर्ज है, तो original_owner_name और relation_to_owner फील्ड का उपयोग करें — उदाहरण: "उक्त भूमि मेरे दादा स्व. XYZ के नाम पर दर्ज है, जिनका मैं वंशज/उत्तराधिकारी हूँ"। यदि भूमि आवेदक के स्वयं के नाम पर है तो इन फील्ड्स को छोड़ दें। LPC किस प्रयोजन हेतु चाहिए (बैंक ऋण, फसल बीमा, सरकारी योजना का लाभ, क्रय-विक्रय, कोर्ट में प्रस्तुति, शपथ पत्र संलग्नक आदि) इसका स्पष्ट उल्लेख करें। राजस्व अभिलेखों की जांच कर नियमानुसार शीघ्र LPC निर्गत करने का विनम्र अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
 
@@ -815,7 +823,7 @@ export const APPLICATION_TYPE_SEEDS: ApplicationTypeInsert[] = [
   },
 
   // ═══════════════════════════════════════════════════════════════════
-  // BANK — 5 types (administrative)
+  // BANK — 6 types (administrative)
   // ═══════════════════════════════════════════════════════════════════
 
   {
@@ -858,11 +866,17 @@ export const APPLICATION_TYPE_SEEDS: ApplicationTypeInsert[] = [
       'खाता धारक का नाम, खाता संख्या और शाखा का नाम बताएं। पासबुक कब और कैसे खोई / क्षतिग्रस्त हुई इसका विवरण दें। पुरानी पासबुक को निरस्त कर डुप्लीकेट पासबुक जारी करने का अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
+  {
+    office_type: 'bank', name_hindi: 'ATM कार्ड हेतु आवेदन', name_english: 'ATM Card Application',
+    keywords: JSON.stringify(['ATM','एटीएम','ATM card','कार्ड','डेबिट कार्ड','debit card','नया कार्ड','खोया कार्ड']),
+    required_fields: withBase(['bank_name','account_number','branch_name','card_type_reason',G]),
+    prompt_template: pa('bank', 'ATM कार्ड हेतु आवेदन',
+      'खाता धारक का नाम, खाता संख्या और शाखा का नाम स्पष्ट रूप से बताएं। ATM/डेबिट कार्ड की आवश्यकता का कारण बताएं (नया खाता — पहला कार्ड, पुराना कार्ड खो गया/चोरी हो गया, पुराना कार्ड क्षतिग्रस्त/एक्सपायर हो गया, आदि)। यदि पुराना कार्ड खोया है तो खोने की तिथि और परिस्थिति का उल्लेख करें। शीघ्र नया ATM/डेबिट कार्ड जारी करने का अनुरोध करें।'),
+    requires_legal_disclaimer: 0, disclaimer_text: null,
+  },
 
   // ═══════════════════════════════════════════════════════════════════
   // COLLEGE — 5 types (certificate/administrative)
-  // ═══════════════════════════════════════════════════════════════════
-
   {
     office_type: 'college', name_hindi: 'बोनाफाइड प्रमाण पत्र आवेदन', name_english: 'Bonafide Certificate Application',
     keywords: JSON.stringify(['बोनाफाइड','bonafide','प्रमाण पत्र','certificate','प्रमाणपत्र']),
