@@ -32,6 +32,7 @@ import type { HomeStackParamList } from '../navigation/HomeStack';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { API_BASE_URL } from '../config';
 import { canGenerateApplication, incrementFreeUsage, consumePaidCredit } from '../services/usageTracker';
+import { fetchWithTimeout, FetchTimeoutError } from '../utils/fetchWithTimeout';
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -294,11 +295,15 @@ export default function CustomApplicationScreen({ route, navigation }: Props) {
     };
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/generate-custom-application`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetchWithTimeout(
+        `${API_BASE_URL}/api/generate-custom-application`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+        45_000, // 45s — enough for Render cold start + AI generation
+      );
 
       const result = await response.json();
       if (!response.ok || !result.success) {
@@ -359,11 +364,29 @@ export default function CustomApplicationScreen({ route, navigation }: Props) {
     } catch (err: any) {
       setSubmitting(false);
 
+      // Timeout — server took too long (cold start, slow network, etc.)
+      if (err instanceof FetchTimeoutError) {
+        const seconds = Math.round(err.timeoutMs / 1000);
+        Alert.alert(
+          '⏳ सर्वर से संपर्क नहीं हो पाया',
+          `सर्वर ने ${seconds} सेकंड से अधिक समय ले लिया। यह आमतौर पर सर्वर के सोने (cold start) के कारण होता है।\n\n` +
+            'कृपया पुनः प्रयास करें — दूसरी बार सर्वर पहले से जागा हुआ होगा और तेज़ी से जवाब देगा।\n\n' +
+            `Server did not respond within ${seconds} seconds. This usually happens when the free server is waking up from sleep (cold start).\n\n` +
+            'Please try again — the server will already be awake and should respond faster.',
+          [
+            { text: 'रद्द करें (Cancel)', style: 'cancel' },
+            { text: 'पुनः प्रयास करें (Retry)', onPress: () => handleGenerate() },
+          ],
+        );
+        return;
+      }
+
       const isNetworkError =
         err?.message?.includes('Network') ||
         err?.message?.includes('fetch') ||
         err?.message?.includes('Failed to fetch') ||
-        err?.message?.includes('TypeError');
+        err?.message?.includes('TypeError') ||
+        err?.message?.includes('timeout');
 
       if (isNetworkError) {
         Alert.alert(

@@ -13,6 +13,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 import { API_BASE_URL } from '../config';
+import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -70,11 +71,11 @@ export async function scanAadharCard(): Promise<AadharExtractedData> {
 
     // 4. Send to OUR backend for OCR processing
     console.log('[Aadhar OCR] Sending image to backend for OCR...');
-    const response = await fetch(`${API_BASE_URL}/api/ocr-aadhar`, {
+    const response = await fetchWithTimeout(`${API_BASE_URL}/api/ocr-aadhar`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ imageBase64: base64 }),
-    });
+    }, 30_000);
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: 'Unknown error' }));

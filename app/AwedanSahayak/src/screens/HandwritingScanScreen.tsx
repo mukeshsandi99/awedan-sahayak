@@ -39,6 +39,7 @@ import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
 // ── Types ───────────────────────────────────────────────────────────
 
 import { API_BASE_URL } from '../config';
+import { fetchWithTimeout, FetchTimeoutError } from '../utils/fetchWithTimeout';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'HandwritingScan'>;
 
@@ -242,11 +243,11 @@ export default function HandwritingScanScreen({ navigation }: Props) {
 
         // 4. Send to backend for OCR
         console.log('[HandwritingScan] Sending image to backend for OCR...');
-        const response = await fetch(`${API_BASE_URL}/api/scan-document`, {
+        const response = await fetchWithTimeout(`${API_BASE_URL}/api/scan-document`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ imageBase64: base64 }),
-        });
+        }, 45_000);
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
@@ -275,7 +276,17 @@ export default function HandwritingScanScreen({ navigation }: Props) {
       }
     } catch (err: any) {
       console.error('[HandwritingScan] Error:', err?.message);
-      setError(err?.message ?? 'Unknown error');
+
+      // Timeout-specific message
+      if (err instanceof FetchTimeoutError) {
+        const seconds = Math.round(err.timeoutMs / 1000);
+        setError(
+          `⏳ सर्वर ने ${seconds} सेकंड से अधिक समय ले लिया (cold start)। कृपया पुनः प्रयास करें।\n\n` +
+          `Server took longer than ${seconds} seconds. Please try again.`,
+        );
+      } else {
+        setError(err?.message ?? 'Unknown error');
+      }
       setIsLoading(false);
       setPhase('info');
     }
@@ -349,11 +360,11 @@ export default function HandwritingScanScreen({ navigation }: Props) {
     setAiCleaning(true);
     try {
       console.log('[HandwritingScan] AI cleanup: sending', editedText.length, 'chars to backend...');
-      const response = await fetch(`${API_BASE_URL}/api/cleanup-ocr`, {
+      const response = await fetchWithTimeout(`${API_BASE_URL}/api/cleanup-ocr`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rawText: editedText }),
-      });
+      }, 30_000);
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
@@ -373,7 +384,17 @@ export default function HandwritingScanScreen({ navigation }: Props) {
       }
     } catch (err: any) {
       console.error('[HandwritingScan] AI cleanup failed:', err?.message);
-      Alert.alert('❌ AI सुधार विफल', err?.message ?? 'AI cleanup failed.');
+
+      if (err instanceof FetchTimeoutError) {
+        const seconds = Math.round(err.timeoutMs / 1000);
+        Alert.alert(
+          '⏳ AI सुधार में बहुत समय लग गया',
+          `सर्वर ने ${seconds} सेकंड से अधिक समय ले लिया।\nकृपया पुनः प्रयास करें — सर्वर अब सक्रिय होना चाहिए।\n\n` +
+          `Server took longer than ${seconds} seconds. Please try again.`,
+        );
+      } else {
+        Alert.alert('❌ AI सुधार विफल', err?.message ?? 'AI cleanup failed.');
+      }
     } finally {
       setAiCleaning(false);
     }

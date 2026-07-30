@@ -66,7 +66,13 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 // ── Start ──────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[Server] Listening on http://localhost:${PORT}`);
   console.log(`[Server] API endpoint: POST http://localhost:${PORT}/api/generate-application`);
 });
+
+// ── Server-level timeout ────────────────────────────────────────────
+// Free-tier Render cold starts + AI generation can be slow, but we cap
+// at 50s so clients get a response rather than an indefinite hang.
+// (Client-side timeout is 45s — this gives the server a 5s buffer.)
+server.timeout = 50_000; // 50 seconds
