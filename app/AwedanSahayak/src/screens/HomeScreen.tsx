@@ -33,6 +33,7 @@ const OFFICE_ICONS: Record<OfficeType, keyof typeof Ionicons.glyphMap> = {
   pwd: 'hammer',
   rcd: 'map',
   bcd: 'home',
+  transport: 'car',
 };
 
 const OFFICE_COLORS: Record<OfficeType, string> = {
@@ -50,6 +51,7 @@ const OFFICE_COLORS: Record<OfficeType, string> = {
   pwd: '#4E342E',
   rcd: '#BF360C',
   bcd: '#37474F',
+  transport: '#1565C0',
 };
 
 // ── Types ───────────────────────────────────────────────────────────

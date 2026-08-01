@@ -7,9 +7,16 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { draftApplication, draftCustomApplication } from '../services/aiService';
+import { AIRouter } from '../services/ai/AIRouter';
+import { createLogger } from '../config/logger';
+import { aiLimiter } from '../middleware/rateLimit';
+
+const log = createLogger('Generate');
 
 export const generateRouter = Router();
+
+// Apply AI rate limiter to all routes in this router
+generateRouter.use(aiLimiter());
 
 // ── Validation ─────────────────────────────────────────────────────
 
@@ -50,35 +57,35 @@ function validateGenerateRequest(body: any): { valid: true; data: GenerateReques
 // ── Route handler ──────────────────────────────────────────────────
 
 generateRouter.post('/generate-application', async (req: Request, res: Response) => {
-  console.log('[POST /generate-application] Received request.');
+  log.info('[POST /generate-application] Received request.');
 
   const validation = validateGenerateRequest(req.body);
   if (!validation.valid) {
-    console.log('[POST /generate-application] Validation failed:', validation.error);
+    log.info('[POST /generate-application] Validation failed:', validation.error);
     res.status(400).json({ error: validation.error });
     return;
   }
 
   const { applicationName, officeType, promptTemplate, formData } = validation.data;
-  console.log(`[POST /generate-application] Type: ${applicationName} | Office: ${officeType}`);
-  console.log(`[POST /generate-application] Form fields (${Object.keys(formData).length}):`, Object.keys(formData).join(', '));
+  log.info(`[POST /generate-application] Type: ${applicationName} | Office: ${officeType}`);
+  log.info(`[POST /generate-application] Form fields (${Object.keys(formData).length}):`, Object.keys(formData).join(', '));
   // Debug: print every field with its value (truncated for log readability)
-  console.log('[POST /generate-application] === RECEIVED FORM DATA ===');
+  log.info('[POST /generate-application] === RECEIVED FORM DATA ===');
   for (const [k, v] of Object.entries(formData)) {
     const val = typeof v === 'string' ? v : JSON.stringify(v);
-    console.log(`[POST /generate-application]   ${k}: "${val.substring(0, 100)}"`);
+    log.info(`[POST /generate-application]   ${k}: "${val.substring(0, 100)}"`);
   }
-  console.log('[POST /generate-application] === END FORM DATA ===');
+  log.info('[POST /generate-application] === END FORM DATA ===');
 
   try {
-    const result = await draftApplication({
+    const result = await AIRouter.generateApplication({
       applicationName,
       officeType,
       promptTemplate,
       formData,
     });
 
-    console.log(`[POST /generate-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model}`);
+    log.info(`[POST /generate-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed})`);
     res.json({
       success: true,
       generatedText: result.generatedText,
@@ -86,10 +93,12 @@ generateRouter.post('/generate-application', async (req: Request, res: Response)
         provider: result.provider,
         model: result.model,
         usage: result.usage,
+        fallbackUsed: result.fallbackUsed,
+        durationMs: result.durationMs,
       },
     });
   } catch (err: any) {
-    console.error('[POST /generate-application] Failed:', err.message);
+    log.error('[POST /generate-application] Failed:', err.message);
     res.status(500).json({
       error: 'आवेदन पत्र जनरेट करने में त्रुटि। / Failed to generate application.',
       detail: process.env.NODE_ENV === 'development' ? err.message : undefined,
@@ -134,11 +143,11 @@ function validateCustomGenerateRequest(body: any): { valid: true; data: CustomGe
 }
 
 generateRouter.post('/generate-custom-application', async (req: Request, res: Response) => {
-  console.log('[POST /generate-custom-application] Received request.');
+  log.info('[POST /generate-custom-application] Received request.');
 
   const validation = validateCustomGenerateRequest(req.body);
   if (!validation.valid) {
-    console.log('[POST /generate-custom-application] Validation failed:', validation.error);
+    log.info('[POST /generate-custom-application] Validation failed:', validation.error);
     res.status(400).json({ error: validation.error });
     return;
   }
@@ -151,18 +160,18 @@ generateRouter.post('/generate-custom-application', async (req: Request, res: Re
     custom_description: customDescription,
   };
 
-  console.log(`[POST /generate-custom-application] Office: ${officeName} | Designation: ${recipientDesignation || '(none)'}`);
-  console.log(`[POST /generate-custom-application] Description length: ${customDescription.length} chars`);
-  console.log(`[POST /generate-custom-application] Identity fields (${Object.keys(formData).length}):`, Object.keys(formData).join(', '));
+  log.info(`[POST /generate-custom-application] Office: ${officeName} | Designation: ${recipientDesignation || '(none)'}`);
+  log.info(`[POST /generate-custom-application] Description length: ${customDescription.length} chars`);
+  log.info(`[POST /generate-custom-application] Identity fields (${Object.keys(formData).length}):`, Object.keys(formData).join(', '));
 
   try {
-    const result = await draftCustomApplication({
+    const result = await AIRouter.generateCustomApplication({
       officeName,
       recipientDesignation,
       formData: enrichedFormData,
     });
 
-    console.log(`[POST /generate-custom-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model}`);
+    log.info(`[POST /generate-custom-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed})`);
     res.json({
       success: true,
       generatedText: result.generatedText,
@@ -171,10 +180,12 @@ generateRouter.post('/generate-custom-application', async (req: Request, res: Re
         model: result.model,
         usage: result.usage,
         isCustom: true,
+        fallbackUsed: result.fallbackUsed,
+        durationMs: result.durationMs,
       },
     });
   } catch (err: any) {
-    console.error('[POST /generate-custom-application] Failed:', err.message);
+    log.error('[POST /generate-custom-application] Failed:', err.message);
     res.status(500).json({
       error: 'आवेदन पत्र जनरेट करने में त्रुटि। / Failed to generate application.',
       detail: process.env.NODE_ENV === 'development' ? err.message : undefined,

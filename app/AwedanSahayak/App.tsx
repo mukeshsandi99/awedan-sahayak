@@ -6,6 +6,15 @@ import * as SplashScreen from 'expo-splash-screen';
 import TabNavigator from './src/navigation/TabNavigator';
 import { initDatabase } from './src/database/db';
 import { initIAP, cleanupIAP } from './src/services/iap';
+import { AdManager } from './src/services/ads/AdManager';
+import { initFirebase, isFirebaseAvailable } from './src/services/firebase/Firebase';
+import { EventLogger } from './src/services/firebase/EventLogger';
+import { RemoteConfig } from './src/services/firebase/RemoteConfig';
+import { CrashReporter, setupGlobalErrorHandlers } from './src/services/firebase/CrashReporter';
+import { Performance } from './src/services/firebase/Performance';
+
+// Setup global error handlers as early as possible
+setupGlobalErrorHandlers();
 
 // Keep the splash screen visible while we initialise the database
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -25,6 +34,28 @@ export default function App() {
         initIAP().catch((err: any) =>
           console.warn('[App] IAP init failed (non-fatal):', err?.message),
         );
+
+        // Initialize AdMob (non-blocking)
+        AdManager.init().catch((err: any) =>
+          console.warn('[App] AdMob init failed (non-fatal):', err?.message),
+        );
+
+        // Show app-open ad on cold start (non-blocking)
+        setTimeout(() => {
+          AdManager.showAppOpenIfEligible().catch(() => {});
+        }, 1500);
+
+        // Initialize Firebase services (non-blocking, safe without config)
+        initFirebase().then((available) => {
+          if (available) {
+            RemoteConfig.fetch().catch(() => {});
+            CrashReporter.setAnonymousId(`app-${Date.now()}`).catch(() => {});
+          }
+        }).catch(() => {});
+
+        // Log app open event
+        EventLogger.appOpen().catch(() => {});
+        Performance.measureStartup().catch(() => {});
 
         setDbReady(true);
       } catch (err: any) {

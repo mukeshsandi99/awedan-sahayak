@@ -38,8 +38,8 @@ import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
 
 // ── Types ───────────────────────────────────────────────────────────
 
-import { API_BASE_URL } from '../config';
-import { fetchWithTimeout, FetchTimeoutError } from '../utils/fetchWithTimeout';
+import { scanDocument, cleanupOcr } from '../services/apiClient';
+import { FetchTimeoutError } from '../utils/fetchWithTimeout';
 
 type Props = NativeStackScreenProps<HomeStackParamList, 'HandwritingScan'>;
 
@@ -243,19 +243,13 @@ export default function HandwritingScanScreen({ navigation }: Props) {
 
         // 4. Send to backend for OCR
         console.log('[HandwritingScan] Sending image to backend for OCR...');
-        const response = await fetchWithTimeout(`${API_BASE_URL}/api/scan-document`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: base64 }),
-        }, 45_000);
+        const apiResult = await scanDocument(base64);
 
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new Error((errData as any)?.error ?? `Server error (${response.status})`);
+        if (!apiResult.ok) {
+          throw new Error(apiResult.error || `OCR failed`);
         }
 
-        const data = await response.json();
-        const text = data.rawText ?? '';
+        const text = apiResult.data?.rawText ?? '';
 
         if (!text || text.trim().length === 0) {
           setError(
@@ -360,19 +354,13 @@ export default function HandwritingScanScreen({ navigation }: Props) {
     setAiCleaning(true);
     try {
       console.log('[HandwritingScan] AI cleanup: sending', editedText.length, 'chars to backend...');
-      const response = await fetchWithTimeout(`${API_BASE_URL}/api/cleanup-ocr`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rawText: editedText }),
-      }, 30_000);
+      const apiResult = await cleanupOcr(editedText);
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error((errData as any)?.error ?? `Server error (${response.status})`);
+      if (!apiResult.ok) {
+        throw new Error(apiResult.error || 'AI cleanup failed');
       }
 
-      const data = await response.json();
-      const cleaned = data.cleanedText ?? '';
+      const cleaned = apiResult.data?.cleanedText ?? '';
       if (cleaned.trim().length > 0) {
         setEditedText(cleaned);
         setAiCleaned(true);

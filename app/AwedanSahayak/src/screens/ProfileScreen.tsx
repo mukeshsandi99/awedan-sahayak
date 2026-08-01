@@ -42,6 +42,7 @@ export default function ProfileScreen() {
 
   // ── OCR flow state ──────────────────────────────────────────────
   const [showPrivacyNotice, setShowPrivacyNotice] = useState(false);
+  const [showPrivacyInfo, setShowPrivacyInfo] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanningSide, setScanningSide] = useState<'front' | 'back'>('front');
   const [showBackPrompt, setShowBackPrompt] = useState(false);
@@ -187,7 +188,7 @@ export default function ProfileScreen() {
       gender: reviewGender || null,
       address: reviewAddress || null,
       phone_number: reviewPhone || null,
-      rawText: '', // merged from two scans, raw text not meaningful
+      aadharLast4: null,
     };
     setExtractedData(merged);
     setShowReview(true);
@@ -201,8 +202,7 @@ export default function ProfileScreen() {
       // Parse combined address into location components
       const parsed = parseAddressComponents(reviewAddress.trim() || '');
 
-      if (__DEV__) { console.log('[Profile Save] Raw address:', reviewAddress); }
-      if (__DEV__) { console.log('[Profile Save] Parsed components:', JSON.stringify(parsed)); }
+      if (__DEV__) { console.log('[Profile Save] Address length:', reviewAddress.length, 'fields parsed:', Object.keys(parsed).filter(k => (parsed as any)[k]).length); }
 
       const updateData = {
         name: reviewName.trim() || undefined,
@@ -219,7 +219,7 @@ export default function ProfileScreen() {
         aadhar_last4: profile?.aadhar_last4 ?? undefined,
       };
 
-      if (__DEV__) { console.log('[Profile Save] Writing to DB:', JSON.stringify(updateData)); }
+      if (__DEV__) { console.log('[Profile Save] Writing to DB — fields:', Object.keys(updateData).filter(k => (updateData as any)[k] !== undefined).length); }
 
       if (profile) {
         await updateUserProfile(updateData);
@@ -250,6 +250,75 @@ export default function ProfileScreen() {
       Alert.alert('❌ सेव नहीं हो सका', err?.message ?? 'Unknown error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Data deletion ──────────────────────────────────────────────
+
+  const handleClearProfile = async () => {
+    try {
+      if (profile) {
+        // Clear all profile fields but keep the row
+        await updateUserProfile({
+          name: '',
+          dob: null,
+          gender: null,
+          address: null,
+          phone: null,
+          village: null,
+          post: null,
+          thana: null,
+          district: null,
+          state: null,
+          parent_spouse_name: null,
+          aadhar_last4: null,
+        });
+        await loadProfile();
+        Alert.alert('✅ प्रोफ़ाइल साफ हो गई', 'आपकी प्रोफ़ाइल की जानकारी हटा दी गई है।\n\nProfile cleared successfully.');
+      }
+    } catch (err: any) {
+      Alert.alert('❌ त्रुटि', 'प्रोफ़ाइल साफ नहीं हो सकी।\n\n' + (err?.message ?? ''));
+    }
+  };
+
+  const handleDeleteAllData = async () => {
+    try {
+      // 1. Clear profile
+      if (profile) {
+        await updateUserProfile({
+          name: '',
+          dob: null, gender: null, address: null, phone: null,
+          village: null, post: null, thana: null, district: null, state: null,
+          parent_spouse_name: null, aadhar_last4: null,
+        });
+      }
+
+      // 2. Delete all generated applications
+      const { getApplicationsWithDetails, deleteGeneratedApplication } = require('../database/db');
+      const apps = await getApplicationsWithDetails();
+      for (const app of apps) {
+        // Cancel any pending reminders
+        if (app.notification_id) {
+          try {
+            const { cancelScheduledReminder } = require('../services/reminders');
+            await cancelScheduledReminder(app.notification_id, app.id);
+          } catch {}
+        }
+        await deleteGeneratedApplication(app.id);
+      }
+
+      // 3. Reset usage metadata (but NOT subscription/paid credits)
+      const { setMetadataInt } = require('../database/db');
+      await setMetadataInt('free_applications_used', 0);
+      // Keep subscription_status, subscription_purchase_token, paid_credits intact
+
+      await loadProfile();
+      Alert.alert(
+        '✅ सभी स्थानीय डेटा हटा दिया गया',
+        'प्रोफ़ाइल, सेव किए गए आवेदन और उपयोग की जानकारी हटा दी गई है।\nखरीदे गए क्रेडिट और सदस्यता सुरक्षित हैं।\n\nAll local data deleted. Purchased credits & subscription preserved.',
+      );
+    } catch (err: any) {
+      Alert.alert('❌ त्रुटि', 'डेटा हटाने में त्रुटि आई।\n\n' + (err?.message ?? ''));
     }
   };
 
@@ -400,6 +469,78 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        {/* ── Privacy Information ────────────────────────────────── */}
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={styles.privacyHeader}
+            onPress={() => setShowPrivacyInfo(!showPrivacyInfo)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="shield-checkmark-outline" size={20} color="#6C5CE7" />
+            <Text style={styles.sectionTitle}>गोपनीयता जानकारी / Privacy Information</Text>
+            <Ionicons name={showPrivacyInfo ? 'chevron-up' : 'chevron-down'} size={18} color="#999" />
+          </TouchableOpacity>
+          {showPrivacyInfo && (
+            <View style={styles.privacyContent}>
+              <Text style={styles.privacySubtitle}>📱 डिवाइस पर क्या सेव होता है</Text>
+              <Text style={styles.privacyText}>• आपकी प्रोफ़ाइल जानकारी (नाम, पता, फ़ोन, आदि){'\n'}• सेव किए गए आवेदन पत्र{'\n'}• उपयोग की जानकारी (कितने आवेदन बनाए){'\n'}• आधार के अंतिम 4 अंक (पूरा नंबर कभी नहीं)</Text>
+
+              <Text style={styles.privacySubtitle}>☁️ सर्वर पर क्या भेजा जाता है</Text>
+              <Text style={styles.privacyText}>• आधार कार्ड की फोटो — OCR प्रोसेसिंग के लिए (तुरंत बाद हटा दी जाती है){'\n'}• हस्तलिखित आवेदन की फोटो — OCR के लिए{'\n'}• आवेदन पत्र का टेक्स्ट — AI जनरेशन के लिए</Text>
+
+              <Text style={styles.privacySubtitle}>🔗 Third-Party सेवाएं</Text>
+              <Text style={styles.privacyText}>• Google Cloud Vision — OCR प्रोसेसिंग{'\n'}• AI Provider (Claude/DeepSeek) — आवेदन निर्माण</Text>
+
+              <Text style={styles.privacySubtitle}>🚫 क्या सेव नहीं होता</Text>
+              <Text style={styles.privacyText}>• आधार कार्ड की raw फोटो{'\n'}• पूरा आधार नंबर (12 अंक){'\n'}• Raw OCR टेक्स्ट{'\n'}• API Keys</Text>
+
+              <Text style={styles.privacySubtitle}>🛡️ आपके नियंत्रण</Text>
+              <Text style={styles.privacyText}>• प्रोफ़ाइल एडिट करें{'\n'}• प्रोफ़ाइल साफ करें (नीचे बटन){'\n'}• सेव किए गए आवेदन हटाएं{'\n'}• सभी स्थानीय डेटा हटाएं (नीचे बटन){'\n'}• मैन्युअल रूप से जानकारी भरें</Text>
+            </View>
+          )}
+        </View>
+
+        {/* ── Data Deletion Controls ──────────────────────────────── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>डेटा प्रबंधन / Data Management</Text>
+
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => {
+              Alert.alert(
+                'प्रोफ़ाइल साफ करें?',
+                'आपकी प्रोफ़ाइल की सारी जानकारी हटा दी जाएगी। सेव किए गए आवेदन सुरक्षित रहेंगे।\n\nThis will clear all your profile information. Your saved applications will remain.',
+                [
+                  { text: 'रद्द करें', style: 'cancel' },
+                  { text: 'साफ करें', style: 'destructive', onPress: handleClearProfile },
+                ],
+              );
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="person-remove-outline" size={18} color="#D63031" style={{ marginRight: 8 }} />
+            <Text style={styles.deleteButtonText}>प्रोफ़ाइल साफ करें (Clear Profile)</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.deleteButton, { marginTop: 12 }]}
+            onPress={() => {
+              Alert.alert(
+                '⚠️ सभी स्थानीय डेटा हटाएं?',
+                'यह कार्रवाई वापस नहीं ली जा सकती।\n\nनिम्न सब हटा दिया जाएगा:\n• प्रोफ़ाइल\n• सभी सेव किए गए आवेदन\n• उपयोग की जानकारी\n• रिमाइंडर\n\nआपके खरीदे गए क्रेडिट और सदस्यता सुरक्षित रहेंगे।\n\nThis cannot be undone. All local data will be deleted. Purchased credits and subscription remain safe.',
+                [
+                  { text: 'रद्द करें', style: 'cancel' },
+                  { text: 'सब हटाएं', style: 'destructive', onPress: handleDeleteAllData },
+                ],
+              );
+            }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="trash-outline" size={18} color="#D63031" style={{ marginRight: 8 }} />
+            <Text style={styles.deleteButtonText}>सभी स्थानीय डेटा हटाएं (Delete All Local Data)</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* ── About App ─────────────────────────────────────────── */}
         <View style={styles.aboutSection}>
           <Text style={styles.aboutTitle}>ऐप के बारे में / About App</Text>
@@ -422,37 +563,67 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* ── Privacy notice modal ─────────────────────────────────── */}
+      {/* ── Consent modal (REQUIRED before Aadhar scan) ──────────── */}
       <Modal visible={showPrivacyNotice} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <View style={styles.consentCard}>
             <Ionicons name="shield-checkmark" size={48} color="#E17055" />
-            <Text style={styles.modalTitle}>आपकी जानकारी सुरक्षित है</Text>
-            <Text style={styles.modalBody}>
-              {'आपका आधार नंबर कभी सेव नहीं किया जाता।\n' +
-                'केवल आपका नाम और पता निकाला जाता है।\n' +
-                'आपकी फोटो OCR के लिए Google की सेवा में भेजी जाती है,\n' +
-                'आधार नंबर हटा दिया जाता है और फोटो तुरंत बाद हटा दी जाती है।\n' +
-                'हमारा सर्वर कोई फोटो स्टोर नहीं करता।\n\n' +
-                'Your Aadhaar number is never stored.\n' +
-                'Your photo is sent to Google for OCR only.\n' +
-                'The Aadhaar number is removed and the photo\n' +
-                'is deleted immediately after. Our server\n' +
-                'never stores any photo.'}
-            </Text>
+            <Text style={styles.consentTitle}>आधार स्कैन — आपकी सहमति आवश्यक</Text>
+            <ScrollView style={styles.consentBodyScroll}>
+              <Text style={styles.consentBody}>
+                {'आपके आधार कार्ड की फोटो खींचकर उसमें से निम्न जानकारी निकाली जाएगी:\n\n' +
+                  '📋 नाम\n' +
+                  '📅 जन्म तिथि / जन्म वर्ष\n' +
+                  '⚤ लिंग\n' +
+                  '🏠 पता\n' +
+                  '📞 मोबाइल नंबर (यदि उपलब्ध हो)\n' +
+                  '🔢 आधार के अंतिम 4 अंक (पूरा नंबर कभी नहीं)\n\n' +
+                  '⚠️ महत्वपूर्ण जानकारी:\n\n' +
+                  '• आपकी फोटो secure server पर भेजी जाएगी।\n' +
+                  '• सर्वर OCR के लिए Google Cloud Vision का उपयोग कर सकता है।\n' +
+                  '• आपकी पूरी आधार संख्या कभी save नहीं की जाएगी।\n' +
+                  '• आपकी फोटो OCR के तुरंत बाद हटा दी जाएगी — कहीं भी permanently store नहीं होगी।\n' +
+                  '• आप चाहें तो मैन्युअल रूप से भी जानकारी भर सकते हैं।\n\n' +
+                  '"मैं सहमत हूँ" का अर्थ है कि आपने ऊपर दी गई जानकारी पढ़ ली है और आप अपनी आधार फोटो को OCR प्रोसेसिंग के लिए भेजने की अनुमति देते हैं।\n\n' +
+                  '———\n\n' +
+                  'Your Aadhaar photo will be sent securely to our server for OCR processing. The server may use Google Cloud Vision. Only name, DOB, gender, address, phone and last 4 Aadhaar digits will be extracted. Full Aadhaar number is NEVER stored. Your photo is deleted immediately after OCR — never stored permanently. You can also fill details manually.'}
+              </Text>
+            </ScrollView>
+
+            {/* Explicit consent — "I agree and continue scan" */}
             <TouchableOpacity
-              style={styles.continueButton}
+              style={styles.agreeButton}
               onPress={handleScanFront}
               activeOpacity={0.7}
             >
-              <Text style={styles.continueText}>जारी रखें (Continue)</Text>
+              <Ionicons name="checkmark-circle-outline" size={20} color="#FFF" style={{ marginRight: 8 }} />
+              <Text style={styles.agreeText}>मैं सहमत हूँ और स्कैन जारी रखें</Text>
             </TouchableOpacity>
+
+            {/* Manual entry fallback */}
             <TouchableOpacity
-              style={styles.cancelButton}
+              style={styles.manualButton}
+              onPress={() => {
+                setShowPrivacyNotice(false);
+                // Scroll to manual fields
+                Alert.alert(
+                  '📝 मैन्युअल प्रविष्टि',
+                  'आप नीचे दिए गए फॉर्म में अपनी जानकारी खुद भर सकते हैं।\n\nYou can fill your details manually below.',
+                );
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="create-outline" size={18} color="#6C5CE7" style={{ marginRight: 6 }} />
+              <Text style={styles.manualText}>मैन्युअल रूप से जानकारी भरें</Text>
+            </TouchableOpacity>
+
+            {/* Cancel */}
+            <TouchableOpacity
+              style={styles.consentCancelButton}
               onPress={() => setShowPrivacyNotice(false)}
               activeOpacity={0.7}
             >
-              <Text style={styles.cancelText}>रद्द करें</Text>
+              <Text style={styles.consentCancelText}>रद्द करें</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -794,6 +965,109 @@ const styles = StyleSheet.create({
   cancelText: {
     fontSize: 14,
     color: '#999',
+  },
+  // ── Consent modal styles ─────────────────────────────────────
+  consentCard: {
+    width: '90%',
+    maxHeight: '80%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+  },
+  consentTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1A1A2E',
+    marginTop: 12,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  consentBodyScroll: {
+    maxHeight: 320,
+    width: '100%',
+    marginBottom: 16,
+  },
+  consentBody: {
+    fontSize: 13,
+    color: '#555',
+    lineHeight: 20,
+    textAlign: 'left',
+  },
+  agreeButton: {
+    flexDirection: 'row',
+    backgroundColor: '#27AE60',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    marginBottom: 8,
+  },
+  agreeText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  manualButton: {
+    flexDirection: 'row',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  manualText: {
+    fontSize: 14,
+    color: '#6C5CE7',
+    fontWeight: '600',
+  },
+  consentCancelButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  consentCancelText: {
+    fontSize: 14,
+    color: '#999',
+  },
+  // ── Privacy section styles ───────────────────────────────────
+  privacyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  privacyContent: {
+    marginTop: 12,
+    paddingLeft: 4,
+  },
+  privacySubtitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1A1A2E',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  privacyText: {
+    fontSize: 13,
+    color: '#666',
+    lineHeight: 20,
+  },
+  // ── Data deletion styles ─────────────────────────────────────
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF5F5',
+    borderWidth: 1,
+    borderColor: '#FFE0E0',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginTop: 8,
+  },
+  deleteButtonText: {
+    fontSize: 14,
+    color: '#D63031',
+    fontWeight: '600',
   },
   skipButton: {
     paddingVertical: 10,

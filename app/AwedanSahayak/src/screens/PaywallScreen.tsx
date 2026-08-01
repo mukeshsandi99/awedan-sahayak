@@ -27,6 +27,7 @@ import type { HomeStackParamList } from '../navigation/HomeStack';
 import {
   purchaseMonthlySubscription,
   purchaseSingleApplication,
+  restorePurchases,
   isIAPReady,
   getProductDetails,
   getIAPErrorMessage,
@@ -41,6 +42,7 @@ type Props = NativeStackScreenProps<HomeStackParamList, 'Paywall'>;
 
 export default function PaywallScreen({ navigation }: Props) {
   const [purchasing, setPurchasing] = useState<'none' | 'subscription' | 'one_time'>('none');
+  const [restoring, setRestoring] = useState(false);
   const [freeUsed, setFreeUsed] = useState(0);
   const [credits, setCredits] = useState(0);
   const [monthlyPrice, setMonthlyPrice] = useState('₹100/माह');
@@ -226,6 +228,39 @@ export default function PaywallScreen({ navigation }: Props) {
           सुरक्षित Google Play भुगतान। आपके सभी आवेदन आपके डिवाइस पर सुरक्षित रहते हैं।
         </Text>
       </View>
+
+      {/* Restore Purchases */}
+      <TouchableOpacity
+        style={styles.restoreLink}
+        onPress={async () => {
+          if (restoring) return;
+          setRestoring(true);
+          try {
+            const result = await restorePurchases();
+            Alert.alert(
+              result.subscriptionRestored ? '✅ सदस्यता पुनर्स्थापित' : '📋 पुनर्स्थापना परिणाम',
+              result.message,
+            );
+            if (result.subscriptionRestored) {
+              navigation.goBack();
+            }
+          } catch (err: any) {
+            Alert.alert('❌ त्रुटि', 'पुनर्स्थापित करने में त्रुटि आई।\n\nFailed to restore.');
+          } finally {
+            setRestoring(false);
+          }
+        }}
+        disabled={isBusy || restoring}
+        activeOpacity={0.6}
+      >
+        {restoring ? (
+          <ActivityIndicator size="small" color="#6C5CE7" />
+        ) : (
+          <Text style={styles.restoreText}>
+            🔄 खरीदारी पुनर्स्थापित करें (Restore Purchases)
+          </Text>
+        )}
+      </TouchableOpacity>
 
       {/* Footer */}
       <TouchableOpacity
@@ -417,6 +452,15 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 14,
     color: '#999',
-    fontWeight: '500',
+  },
+  restoreLink: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    marginBottom: 8,
+  },
+  restoreText: {
+    fontSize: 14,
+    color: '#6C5CE7',
+    fontWeight: '600',
   },
 });

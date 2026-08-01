@@ -18,9 +18,10 @@ import { getApplicationTypeById, getUserProfile, insertGeneratedApplication } fr
 import type { ApplicationType, UserProfile } from '../types/database';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { useVoiceInput } from '../hooks/useVoiceInput';
-import { API_BASE_URL } from '../config';
 import { canGenerateApplication, incrementFreeUsage, consumePaidCredit } from '../services/usageTracker';
-import { fetchWithTimeout, FetchTimeoutError } from '../utils/fetchWithTimeout';
+import { generateApplication } from '../services/apiClient';
+import { FetchTimeoutError } from '../utils/fetchWithTimeout';
+import { AdManager } from '../services/ads/AdManager';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -642,26 +643,20 @@ export default function ApplicationFormScreen({ route, navigation }: Props) {
         promptTemplate: payload.prompt_template,
         formData: payload.form_data,
       };
-      console.log('[ApplicationForm] Sending to:', `${API_BASE_URL}/api/generate-application`);
-      console.log('[ApplicationForm] Request body keys:', Object.keys(requestBody));
+      console.log('[ApplicationForm] Sending generate-application request...');
 
-      const response = await fetchWithTimeout(
-        `${API_BASE_URL}/api/generate-application`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-        },
-        45_000, // 45s — enough for Render cold start + AI generation
+      const apiResult = await generateApplication(
+        requestBody.applicationName,
+        requestBody.officeType,
+        requestBody.promptTemplate,
+        requestBody.formData,
       );
 
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        const errMsg = result.error ?? `Server responded with ${response.status}`;
-        throw new Error(errMsg);
+      if (!apiResult.ok) {
+        throw new Error(apiResult.error || 'Generation failed');
       }
 
+      const result = apiResult.data!;
       console.log(`[ApplicationForm] Generated ${result.generatedText.length} chars via ${result.metadata?.provider}/${result.metadata?.model}`);
 
       // Save to local SQLite for history
@@ -700,6 +695,10 @@ export default function ApplicationFormScreen({ route, navigation }: Props) {
       }
 
       setSubmitting(false);
+
+      // Track generation for interstitial frequency & show if eligible
+      AdManager.onApplicationGenerated().catch(() => {});
+      AdManager.showInterstitialIfEligible().catch(() => {});
 
       // Navigate to preview screen (pass savedAppId for reminder scheduling)
       navigation.navigate('ApplicationPreview', {

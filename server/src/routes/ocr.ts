@@ -8,14 +8,23 @@
  * Requires: GOOGLE_VISION_API_KEY in server/.env
  *
  * Privacy: Image is sent to Google's servers for processing only.
+ *
+ * SECURITY: OCR results containing Aadhar/PII are NEVER logged in production.
  * The Aadhar number is redacted from results. No image is stored
  * on our server or in Google Cloud Storage.
  */
 
 import { Router, Request, Response } from 'express';
 import sharp from 'sharp';
+import { createLogger } from '../config/logger';
+import { ocrLimiter } from '../middleware/rateLimit';
+
+const log = createLogger('OCR');
 
 export const ocrRouter = Router();
+
+// Apply OCR rate limiter
+ocrRouter.use(ocrLimiter());
 
 // ── Config ───────────────────────────────────────────────────────────
 
@@ -71,7 +80,7 @@ async function preprocessImage(base64: string): Promise<string> {
     .toBuffer();
 
   const outSize = processed.length;
-  console.log(`[OCR Preproc] ${origW}x${origH} → ${targetW}x${targetH} → JPEG ${(outSize / 1024).toFixed(1)}KB`);
+  log.info(`[OCR Preproc] ${origW}x${origH} → ${targetW}x${targetH} → JPEG ${(outSize / 1024).toFixed(1)}KB`);
   return processed.toString('base64');
 }
 
@@ -371,11 +380,11 @@ function isAadharOrVid(num: string): boolean {
 // ── Route handler ──────────────────────────────────────────────────
 
 ocrRouter.post('/ocr-aadhar', async (req: Request, res: Response) => {
-  console.log('[POST /ocr-aadhar] Received request.');
+  log.info('[POST /ocr-aadhar] Received request.');
 
   const VISION_API_KEY = getVisionApiKey();
   if (!VISION_API_KEY) {
-    console.error('[POST /ocr-aadhar] GOOGLE_VISION_API_KEY not configured!');
+    log.error('[POST /ocr-aadhar] GOOGLE_VISION_API_KEY not configured!');
     res.status(500).json({ error: 'Server OCR not configured. Set GOOGLE_VISION_API_KEY in server/.env.' });
     return;
   }
@@ -387,17 +396,17 @@ ocrRouter.post('/ocr-aadhar', async (req: Request, res: Response) => {
   }
 
   const { imageBase64 } = validation;
-  console.log(`[POST /ocr-aadhar] Raw image: ${imageBase64.length} chars base64.`);
+  log.info(`[POST /ocr-aadhar] Raw image: ${imageBase64.length} chars base64.`);
 
   try {
     // Step 1: Preprocess image (upscale, grayscale, sharpen)
-    console.log('[POST /ocr-aadhar] Preprocessing image...');
+    log.info('[POST /ocr-aadhar] Preprocessing image...');
     const processedBase64 = await preprocessImage(imageBase64);
-    console.log(`[POST /ocr-aadhar] Preprocessed: ${processedBase64.length} chars base64 JPEG.`);
+    log.info(`[POST /ocr-aadhar] Preprocessed: ${processedBase64.length} chars base64 JPEG.`);
 
     // Step 2: Call Google Cloud Vision API
-    console.log('[POST /ocr-aadhar] Calling Google Cloud Vision API (DOCUMENT_TEXT_DETECTION)...');
-    console.log(`[OCR Debug] Processed image size: ${processedBase64.length} chars base64`);
+    log.info('[POST /ocr-aadhar] Calling Google Cloud Vision API (DOCUMENT_TEXT_DETECTION)...');
+    log.info(`[OCR Debug] Processed image size: ${processedBase64.length} chars base64`);
     const VISION_API_URL = getVisionApiUrl();
     const requestBody = {
       requests: [{
@@ -405,7 +414,7 @@ ocrRouter.post('/ocr-aadhar', async (req: Request, res: Response) => {
         features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
       }],
     };
-    console.log('[OCR Debug] Vision API request structure:', JSON.stringify(requestBody).substring(0, 300));
+    log.info('[OCR Debug] Vision API request structure:', JSON.stringify(requestBody).substring(0, 300));
 
     const visionResponse = await fetch(VISION_API_URL, {
       method: 'POST',
@@ -418,53 +427,55 @@ ocrRouter.post('/ocr-aadhar', async (req: Request, res: Response) => {
       }),
     });
 
-    console.log(`[OCR Debug] Vision API HTTP status: ${visionResponse.status} ${visionResponse.statusText}`);
+    log.info(`[OCR Debug] Vision API HTTP status: ${visionResponse.status} ${visionResponse.statusText}`);
 
     if (!visionResponse.ok) {
       const errText = await visionResponse.text();
-      console.error('[OCR Debug] Vision API RAW error body:', errText.substring(0, 1000));
+      log.error('[OCR Debug] Vision API RAW error body:', errText.substring(0, 1000));
       let err: any = {};
       try { err = JSON.parse(errText); } catch {}
       throw new Error(`Vision API returned ${visionResponse.status}: ${JSON.stringify(err?.error ?? errText.substring(0, 300))}`);
     }
 
     const visionData: any = await visionResponse.json();
-    console.log('[OCR Debug] Vision API response keys:', JSON.stringify(Object.keys(visionData)));
-    console.log('[OCR Debug] responses[0] keys:', JSON.stringify(visionData?.responses?.[0] ? Object.keys(visionData.responses[0]) : 'MISSING'));
+    log.info('[OCR Debug] Vision API response keys:', JSON.stringify(Object.keys(visionData)));
+    log.info('[OCR Debug] responses[0] keys:', JSON.stringify(visionData?.responses?.[0] ? Object.keys(visionData.responses[0]) : 'MISSING'));
 
     const annotation: any = visionData?.responses?.[0];
     const hasFullText = !!annotation?.fullTextAnnotation?.text;
     const hasTextAnnotations = !!annotation?.textAnnotations?.length;
-    console.log(`[OCR Debug] fullTextAnnotation present: ${hasFullText}, textAnnotations present: ${hasTextAnnotations}`);
-
+    log.info(`[OCR] fullTextAnnotation: ${hasFullText}, textAnnotations: ${hasTextAnnotations}`);
     if (hasFullText) {
-      console.log(`[OCR Debug] fullTextAnnotation.text length: ${annotation.fullTextAnnotation.text.length}`);
+      log.info(`[OCR] fullTextAnnotation.text length: ${annotation.fullTextAnnotation.text.length}`);
     }
     if (hasTextAnnotations) {
-      console.log(`[OCR Debug] textAnnotations count: ${annotation.textAnnotations.length}`);
-      console.log(`[OCR Debug] textAnnotations[0].description length: ${annotation.textAnnotations[0]?.description?.length ?? 0}`);
-      console.log(`[OCR Debug] textAnnotations[0].description first 200: "${(annotation.textAnnotations[0]?.description ?? '').substring(0, 200)}"`);
+      log.info(`[OCR] textAnnotations count: ${annotation.textAnnotations.length}, first desc length: ${annotation.textAnnotations[0]?.description?.length ?? 0}`);
+      // SECURITY: Never log text annotation content — contains Aadhar PII.
     }
 
     // Check for error in response
     if (annotation?.error) {
-      console.error('[OCR Debug] Vision API returned error in response:', JSON.stringify(annotation.error));
+      log.error('[OCR Debug] Vision API returned error in response:', JSON.stringify(annotation.error));
     }
 
     const rawText = annotation?.fullTextAnnotation?.text ?? annotation?.textAnnotations?.[0]?.description ?? '';
 
-    console.log(`[OCR Debug] === FINAL RAW TEXT (${rawText.length} chars) ===`);
-    console.log(rawText.length > 0 ? rawText : '[OCR Debug] *** EMPTY — Vision API returned no text ***');
-    console.log('[OCR Debug] === END RAW TEXT ===');
+    // SECURITY: Never log the raw OCR text — it contains Aadhar numbers and PII.
+    // Only log metadata: character count and whether text was found.
+    const hasText = rawText.length > 0;
+    log.info(`[OCR] Text extracted: ${rawText.length} chars, has_content=${hasText}`);
+    if (!hasText) {
+      log.warn('[OCR] ⚠️  Vision API returned no text — image may be blank or unreadable.');
+    }
 
     // Step 3: Extract fields
     const allLines = rawText.split('\n');
     const lines = allLines.filter((l: string) => l.trim().length > 0);
-    console.log(`[OCR Debug] Total lines: ${allLines.length}, non-empty lines: ${lines.length}`);
+    log.info(`[OCR Debug] Total lines: ${allLines.length}, non-empty lines: ${lines.length}`);
 
     if (lines.length > 0) {
-      console.log('[OCR Debug] All lines:');
-      lines.forEach((l: string, i: number) => console.log(`[OCR Debug]   [${i}] "${l.trim()}"`));
+      log.info('[OCR Debug] All lines:');
+      lines.forEach((l: string, i: number) => log.info(`[OCR Debug]   [${i}] "${l.trim()}"`));
     }
 
     const extractedName = extractName(lines);
@@ -473,30 +484,34 @@ ocrRouter.post('/ocr-aadhar', async (req: Request, res: Response) => {
     const extractedAddress = extractAddress(lines);
     const extractedPhone = extractPhoneNumber(rawText, lines);
 
-    console.log('[OCR Debug] === EXTRACTION RESULTS ===');
-    console.log(`[OCR Debug]   name:    "${extractedName ?? 'null'}"`);
-    console.log(`[OCR Debug]   dob:      ${extractedDob ?? 'null'}`);
-    console.log(`[OCR Debug]   gender:   ${extractedGender ?? 'null'}`);
-    console.log(`[OCR Debug]   address:  "${extractedAddress ?? 'null'}"`);
-    console.log(`[OCR Debug]   phone:    ${extractedPhone ?? 'null'}`);
-    console.log('[OCR Debug] === END EXTRACTION ===');
+    // SECURITY: Log field presence only — never log extracted values (PII).
+    log.info(
+      `[OCR] Extraction complete: name=${!!extractedName} dob=${!!extractedDob} ` +
+      `gender=${!!extractedGender} address=${!!extractedAddress} phone=${!!extractedPhone}`,
+    );
 
-    const result = {
+    const result: Record<string, string | null> = {
       name: extractedName,
       dob: extractedDob,
       gender: extractedGender,
       address: extractedAddress,
       phone_number: extractedPhone,
-      rawText,
     };
+
+    // DEV_DEBUG_OCR env flag: include rawText for development only.
+    // NEVER enabled in production.
+    if (process.env.DEV_DEBUG_OCR === 'true' && process.env.NODE_ENV !== 'production') {
+      result.rawText = rawText;
+      log.info('[OCR] DEV_DEBUG_OCR enabled — rawText included in response.');
+    }
 
     res.json(result);
   } catch (err: any) {
-    console.error('[POST /ocr-aadhar] ========================================');
-    console.error('[POST /ocr-aadhar] OCR FAILED');
-    console.error('[POST /ocr-aadhar] Error:', err?.message ?? 'unknown');
-    if (err?.stack) console.error('[POST /ocr-aadhar] Stack:', err.stack);
-    console.error('[POST /ocr-aadhar] ========================================');
+    log.error('[POST /ocr-aadhar] ========================================');
+    log.error('[POST /ocr-aadhar] OCR FAILED');
+    log.error('[POST /ocr-aadhar] Error:', err?.message ?? 'unknown');
+    if (err?.stack) log.error('[POST /ocr-aadhar] Stack:', err.stack);
+    log.error('[POST /ocr-aadhar] ========================================');
     res.status(500).json({
       error: 'OCR processing failed: ' + (err?.message ?? 'unknown error'),
       detail: process.env.NODE_ENV === 'development' ? String(err?.stack ?? err) : undefined,
