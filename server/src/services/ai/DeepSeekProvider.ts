@@ -27,31 +27,46 @@ export class DeepSeekProvider implements IAIProvider {
       this.client = new Anthropic.default({
         apiKey,
         baseURL: 'https://api.deepseek.com/anthropic',
+        timeout: AIConfig.requestTimeoutMs,
+        maxRetries: 0, // We handle retries in AIRouter
       });
     }
 
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: request.maxTokens ?? 1200,
-      system: request.systemPrompt,
-      messages: [{ role: 'user', content: request.userMessage }],
-      temperature: request.temperature,
-    });
+    try {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: request.maxTokens ?? 1200,
+        system: request.systemPrompt,
+        messages: [{ role: 'user', content: request.userMessage }],
+        temperature: request.temperature,
+      });
 
-    const text = extractText(response.content);
-    const cleanText = text.replace(/\*\*/g, '').replace(/__/g, '');
+      const text = extractText(response.content);
+      const cleanText = text.replace(/\*\*/g, '').replace(/__/g, '');
 
-    return {
-      generatedText: cleanText,
-      provider: this.name,
-      model: this.model,
-      usage: {
-        inputTokens: response.usage?.input_tokens ?? 0,
-        outputTokens: response.usage?.output_tokens ?? 0,
-      },
-      durationMs: Date.now() - start,
-      fallbackUsed: false,
-    };
+      log.info(`[DeepSeek] OK in=${response.usage?.input_tokens ?? 0} out=${response.usage?.output_tokens ?? 0} time=${Date.now() - start}ms`);
+
+      return {
+        generatedText: cleanText,
+        provider: this.name,
+        model: this.model,
+        usage: {
+          inputTokens: response.usage?.input_tokens ?? 0,
+          outputTokens: response.usage?.output_tokens ?? 0,
+        },
+        durationMs: Date.now() - start,
+        fallbackUsed: false,
+      };
+    } catch (err: any) {
+      const httpStatus = err?.status ?? err?.response?.status ?? 0;
+      const providerError = err?.error?.message ?? err?.message ?? String(err);
+      const enriched = new Error(`DeepSeek API ${httpStatus}: ${providerError}`);
+      (enriched as any).status = httpStatus;
+      (enriched as any)._startMs = start;
+      (enriched as any).tokenCount = 0;
+      log.error(`[DeepSeek] FAIL status=${httpStatus} time=${Date.now() - start}ms error="${providerError.substring(0, 120)}"`);
+      throw enriched;
+    }
   }
 
   estimateCost(input: number, output: number): number {
