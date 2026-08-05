@@ -45,17 +45,17 @@ interface RequiredVar {
   devOptional?: boolean;
 }
 
+// ── AI key requirement ──────────────────────────────────────────────────
+//
+// AI keys are provider-dependent. The active provider's key is required;
+// the inactive provider's key is ignored entirely. This avoids forcing
+// production deployments to supply keys for providers they don't use.
+//
+// Validation happens in validateEnv() AFTER AI_PROVIDER is determined.
+//
+// Non-AI keys (Vision, APP_API_SECRET) are listed here unconditionally.
+
 const REQUIRED_VARS: RequiredVar[] = [
-  {
-    key: 'ANTHROPIC_API_KEY',
-    label: 'Anthropic API Key',
-    docsUrl: 'https://console.anthropic.com/settings/keys',
-  },
-  {
-    key: 'DEEPSEEK_API_KEY',
-    label: 'DeepSeek API Key',
-    docsUrl: 'https://platform.deepseek.com/api_keys',
-  },
   {
     key: 'GOOGLE_VISION_API_KEY',
     label: 'Google Cloud Vision API Key',
@@ -68,6 +68,20 @@ const REQUIRED_VARS: RequiredVar[] = [
     devOptional: true, // Optional in dev — auth is disabled without it
   },
 ];
+
+// Provider → which key is required
+const AI_KEY_MAP: Record<string, { key: string; label: string; docsUrl: string }> = {
+  claude: {
+    key: 'ANTHROPIC_API_KEY',
+    label: 'Anthropic API Key',
+    docsUrl: 'https://console.anthropic.com/settings/keys',
+  },
+  deepseek: {
+    key: 'DEEPSEEK_API_KEY',
+    label: 'DeepSeek API Key',
+    docsUrl: 'https://platform.deepseek.com/api_keys',
+  },
+};
 
 const ALLOWED_NODE_ENVS = ['development', 'production', 'staging'] as const;
 
@@ -123,18 +137,17 @@ export function validateEnv(): void {
     }
   }
 
-  // 4. Check cross-dependency: at least one AI key must match the provider
-  if (aiProvider === 'claude' && !process.env.ANTHROPIC_API_KEY) {
-    missing.push(
-      `  • ANTHROPIC_API_KEY is required when AI_PROVIDER="${aiProvider}"\n` +
-      '    → Get it at: https://console.anthropic.com/settings/keys',
-    );
-  }
-  if (aiProvider === 'deepseek' && !process.env.DEEPSEEK_API_KEY) {
-    missing.push(
-      `  • DEEPSEEK_API_KEY is required when AI_PROVIDER="${aiProvider}"\n` +
-      '    → Get it at: https://platform.deepseek.com/api_keys',
-    );
+  // 4. Provider-aware AI key check — ONLY the active provider's key is required
+  const aiKeyInfo = AI_KEY_MAP[aiProvider];
+  if (aiKeyInfo) {
+    const aiKeyValue = process.env[aiKeyInfo.key];
+    const aiKeySet = typeof aiKeyValue === 'string' && aiKeyValue.trim().length > 0;
+    if (!aiKeySet) {
+      missing.push(
+        `  • ${aiKeyInfo.label} (${aiKeyInfo.key}) is required when AI_PROVIDER="${aiProvider}"\n` +
+        `    → Get it at: ${aiKeyInfo.docsUrl}`,
+      );
+    }
   }
 
   // 5. Report findings
