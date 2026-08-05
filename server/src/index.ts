@@ -24,6 +24,7 @@ import { generateRouter } from './routes/generate';
 import { ocrRouter } from './routes/ocr';
 import { scanRouter } from './routes/scan';
 import { billingRouter } from './routes/billing';
+import { aiRouter } from './routes/aiRoutes';
 import { getActiveConfig } from './services/aiService';
 import { createLogger } from './config/logger';
 import { createAuthMiddleware } from './middleware/auth';
@@ -144,6 +145,7 @@ app.use('/api', authMiddleware, generateRouter);
 app.use('/api', authMiddleware, ocrRouter);
 app.use('/api', authMiddleware, scanRouter);
 app.use('/api', authMiddleware, billingRouter);
+app.use('/api', authMiddleware, aiRouter);
 
 // ── Error handler ──────────────────────────────────────────────────
 
