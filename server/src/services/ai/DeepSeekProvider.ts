@@ -32,7 +32,7 @@ export class DeepSeekProvider implements IAIProvider {
 
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: request.maxTokens ?? 1800,
+      max_tokens: request.maxTokens ?? 1200,
       system: request.systemPrompt,
       messages: [{ role: 'user', content: request.userMessage }],
       temperature: request.temperature,
