@@ -9,7 +9,6 @@ const log = createLogger('DeepSeekProvider');
 export class DeepSeekProvider implements IAIProvider {
   readonly name = 'deepseek';
   readonly model = AIConfig.models.deepseek;
-  private client: any = null;
 
   async healthCheck(): Promise<boolean> {
     try {
@@ -23,17 +22,16 @@ export class DeepSeekProvider implements IAIProvider {
     if (!apiKey) throw new Error('DEEPSEEK_API_KEY not configured');
 
     const Anthropic = await import('@anthropic-ai/sdk');
-    if (!this.client) {
-      this.client = new Anthropic.default({
-        apiKey,
-        baseURL: 'https://api.deepseek.com/anthropic',
-        timeout: AIConfig.requestTimeoutMs,
-        maxRetries: 0, // We handle retries in AIRouter
-      });
-    }
+    // Always create a fresh client to avoid connection reuse issues with keep-alive
+    const client = new Anthropic.default({
+      apiKey,
+      baseURL: 'https://api.deepseek.com/anthropic',
+      timeout: AIConfig.requestTimeoutMs,
+      maxRetries: 0,
+    });
 
     try {
-      const response = await this.client.messages.create({
+      const response = await client.messages.create({
         model: this.model,
         max_tokens: request.maxTokens ?? 1200,
         system: request.systemPrompt,
