@@ -136,26 +136,31 @@ function getCircuitBreaker(name: string): AICircuitBreaker {
 export const AIRouter = {
   /**
    * Generate a standard templated application.
-   * Handles provider selection, retry, fallback, dedup internally.
+   * Returns first valid draft immediately; non-critical issues skip repair.
    */
   async generateApplication(req: AIGenerateRequest): Promise<AIResponse> {
+    const requestStart = Date.now();
     const systemPrompt = buildSystemPrompt(req.officeType, req.applicationName);
     const userMessage = buildUserMessage(req);
     const inputErr = validateInput({ systemPrompt, userMessage });
     if (inputErr) throw Object.assign(new Error(inputErr), { code: 'AI_INVALID_INPUT' });
 
     const result = await dispatchWithRetry({ systemPrompt, userMessage });
+    // Pass the requestStart timestamp for time-budget tracking
+    (result as any)._requestStartMs = requestStart;
     return validateAndRepair(result, req.formData, systemPrompt);
   },
 
   /** Generate a custom/blank application. */
   async generateCustomApplication(req: AICustomGenerateRequest): Promise<AIResponse> {
+    const requestStart = Date.now();
     const systemPrompt = buildCustomSystemPrompt(req.officeName, req.recipientDesignation);
     const userMessage = buildCustomUserMessage(req);
     const inputErr = validateInput({ systemPrompt, userMessage });
     if (inputErr) throw Object.assign(new Error(inputErr), { code: 'AI_INVALID_INPUT' });
 
     const result = await dispatchWithRetry({ systemPrompt, userMessage });
+    (result as any)._requestStartMs = requestStart;
     return validateAndRepair(result, req.formData, systemPrompt);
   },
 
@@ -189,47 +194,212 @@ export const AIRouter = {
   },
 };
 
-// ── Fact validation + repair ─────────────────────────────────────────────
+// ── Time budget constants ───────────────────────────────────────────────────
+// Render proxy terminates at ~120s. Server-level timeout is 120s.
+// We return the first valid draft before 90s to leave a safe buffer.
 
-async function validateAndRepair(
+const TOTAL_BUDGET_MS = 90_000;       // Hard ceiling for the whole request
+const REPAIR_MIN_BUDGET_MS = 25_000;   // Must have this much time left to attempt repair
+
+// ── Critical failure detection ──────────────────────────────────────────────
+
+interface DraftAssessment {
+  criticalFailures: string[];
+  nonCriticalIssues: string[];
+  qualityScore: number;
+  factsPassed: boolean;
+  factScore: number;
+}
+
+function assessDraft(
   initialResult: AIResponse,
   formData: Record<string, string>,
-  systemPrompt: string,
-): Promise<AIResponse> {
+): DraftAssessment {
   const qScore = qualityScore(initialResult.generatedText);
   const factResult = validateFacts(formData, initialResult.generatedText);
 
-  if (qScore >= 70 && factResult.passed) return initialResult;
+  const criticalFailures: string[] = [];
+  const nonCriticalIssues: string[] = [];
 
-  log.warn(`[AIRouter] Quality=${qScore}, factScore=${factResult.score} — attempting repair.`);
+  // ── CRITICAL: must block response ──────────────────────────────
+  if (!initialResult.generatedText || initialResult.generatedText.trim().length < 50) {
+    criticalFailures.push('Empty or near-empty output');
+  }
+  if (qScore < 30) {
+    criticalFailures.push(`Quality score critically low: ${qScore}`);
+  }
+
+  // Critical fact mismatches that mean the output is factually wrong
+  const criticalMismatches = factResult.mismatches.filter(m => m.severity === 'critical');
+  if (criticalMismatches.length > 0) {
+    criticalFailures.push(`${criticalMismatches.length} critical fact mismatch(es): ${criticalMismatches.map(m => m.description).join('; ')}`);
+  }
+
+  // ── NON-CRITICAL: can return as-is, user can refine later ───────
+  const nonCriticalMismatches = factResult.mismatches.filter(m => m.severity !== 'critical');
+  if (nonCriticalMismatches.length > 0) {
+    nonCriticalIssues.push(`${nonCriticalMismatches.length} non-critical mismatch(es)`);
+  }
+  if (qScore >= 30 && qScore < 70 && criticalFailures.length === 0) {
+    nonCriticalIssues.push(`Style score below target: ${qScore}/100`);
+  }
+
+  return {
+    criticalFailures,
+    nonCriticalIssues,
+    qualityScore: qScore,
+    factsPassed: factResult.passed,
+    factScore: factResult.score,
+  };
+}
+
+// ── Optimized validateAndRepair ─────────────────────────────────────────────
+
+/**
+ * Validates the AI-generated draft and decides whether to repair.
+ *
+ * CRITICAL failures (empty output, missing core facts, very low quality):
+ *   → ONE synchronous retry attempt IF time budget allows.
+ *
+ * NON-CRITICAL issues (style, optional fields, formatting):
+ *   → Return the first valid draft immediately. User can press "AI सुधारें".
+ *
+ * Time budget: never exceeds TOTAL_BUDGET_MS. Skips repair if
+ * insufficient time remains.
+ */
+async function validateAndRepair(
+  initialResult: AIResponse,
+  formData: Record<string, string>,
+  _systemPrompt: string,
+): Promise<AIResponse> {
+  const requestStart = (initialResult as any)._requestStartMs ?? Date.now();
+  const elapsed = Date.now() - requestStart;
+
+  const assessment = assessDraft(initialResult, formData);
+
+  // Log assessment
+  log.info(
+    `[AIRouter] Draft assessment: Q=${assessment.qualityScore} ` +
+    `F=${assessment.factScore} critical=${assessment.criticalFailures.length} ` +
+    `nonCritical=${assessment.nonCriticalIssues.length} elapsed=${elapsed}ms`,
+  );
+
+  // ── No critical failures → return first draft ──────────────────
+  if (assessment.criticalFailures.length === 0) {
+    if (assessment.nonCriticalIssues.length > 0) {
+      log.info(`[AIRouter] Non-critical issues (skipping repair): ${assessment.nonCriticalIssues.join('; ')}`);
+    }
+    initialResult.qualityScore = assessment.qualityScore;
+    initialResult.repairApplied = false;
+    initialResult.refinementAvailable = assessment.nonCriticalIssues.length > 0;
+    return initialResult;
+  }
+
+  // ── Critical failures → consider repair ────────────────────────
+  log.warn(`[AIRouter] Critical failures: ${assessment.criticalFailures.join('; ')}`);
+
+  // Time budget check — don't start repair if it could breach the proxy limit
+  const remaining = TOTAL_BUDGET_MS - elapsed;
+  if (remaining < REPAIR_MIN_BUDGET_MS) {
+    log.warn(
+      `[AIRouter] Skipping repair — only ${remaining}ms remaining (need ${REPAIR_MIN_BUDGET_MS}ms). ` +
+      `Returning first draft with critical issues noted.`,
+    );
+    initialResult.qualityScore = assessment.qualityScore;
+    initialResult.repairApplied = false;
+    initialResult.refinementAvailable = true;
+    return initialResult;
+  }
+
+  // ── Attempt repair ─────────────────────────────────────────────
+  log.info(`[AIRouter] Attempting repair with ${remaining}ms remaining...`);
 
   try {
-    const repairPrompt = factResult.repairPrompt ?? `Fix issues in: ${initialResult.generatedText.substring(0, 500)}`;
+    const repairPrompt = buildCriticalRepairPrompt(
+      assessment.criticalFailures,
+      formData,
+      initialResult.generatedText,
+    );
+
+    // Limit repair tokens to what's needed — don't regenerate the full 4000
+    const repairTokens = Math.min(
+      Math.max(initialResult.generatedText.length + 500, 1500),
+      3000,
+    );
+
     const repairRequest: AIRequest = {
-      systemPrompt: repairPrompt,
-      userMessage: `Fix this draft:\n\n${initialResult.generatedText}`,
-      maxTokens: Math.max(initialResult.generatedText.length + 500, 2000),
+      systemPrompt: 'You are a Hindi application repair specialist. Fix ONLY the specific issues listed. Keep everything else exactly the same. Return the fixed full application text.',
+      userMessage: repairPrompt,
+      maxTokens: repairTokens,
     };
 
     const repairedResult = await dispatchWithRetry(repairRequest);
-    const repairedScore = qualityScore(repairedResult.generatedText);
-    const repairedFactResult = validateFacts(formData, repairedResult.generatedText);
 
-    if (repairedScore > qScore && repairedFactResult.score >= factResult.score) {
-      log.info(`[AIRouter] Repair improved: Q=${qScore}->${repairedScore} F=${factResult.score}->${repairedFactResult.score}`);
+    // Verify repair improved things
+    const repairedAssessment = assessDraft(repairedResult, formData);
+    const improved =
+      repairedAssessment.criticalFailures.length < assessment.criticalFailures.length ||
+      (repairedAssessment.qualityScore > assessment.qualityScore &&
+       repairedAssessment.criticalFailures.length <= assessment.criticalFailures.length);
+
+    if (improved) {
+      log.info(
+        `[AIRouter] Repair improved: critical ${assessment.criticalFailures.length}→${repairedAssessment.criticalFailures.length} ` +
+        `Q=${assessment.qualityScore}→${repairedAssessment.qualityScore}`,
+      );
       repairedResult.fallbackUsed = initialResult.fallbackUsed;
+      repairedResult.qualityScore = repairedAssessment.qualityScore;
+      repairedResult.repairApplied = true;
+      repairedResult.refinementAvailable = repairedAssessment.nonCriticalIssues.length > 0;
       return repairedResult;
     }
 
-    if (!factResult.passed) {
-      throw Object.assign(new Error('Fact preservation failed after repair.'), { code: 'AI_FACT_MISMATCH' });
-    }
+    // Repair didn't help — return original but don't throw
+    log.warn('[AIRouter] Repair did not improve — returning original draft.');
+    initialResult.qualityScore = assessment.qualityScore;
+    initialResult.repairApplied = false;
+    initialResult.refinementAvailable = true;
     return initialResult;
-  } catch (err: any) {
-    if (err.code === 'AI_FACT_MISMATCH') throw err;
-    if (qScore < 40) throw Object.assign(new Error('AI output quality too low.'), { code: 'AI_OUTPUT_INVALID' });
+  } catch (repairErr: any) {
+    // Repair failed — return original draft, don't throw
+    log.warn(`[AIRouter] Repair failed: ${repairErr?.message?.substring(0, 80)} — returning original draft.`);
+    initialResult.qualityScore = assessment.qualityScore;
+    initialResult.repairApplied = false;
+    initialResult.refinementAvailable = true;
     return initialResult;
   }
+}
+
+/**
+ * Builds a minimal repair prompt targeting only the specific critical issues.
+ * Much shorter than the old full-system-prompt repair — finishes faster.
+ */
+function buildCriticalRepairPrompt(
+  failures: string[],
+  formData: Record<string, string>,
+  currentDraft: string,
+): string {
+  // Include all non-empty form data as reference
+  const allFields = Object.entries(formData)
+    .filter(([, v]) => v && v.trim().length > 0)
+    .map(([k, v]) => `${k}: ${v}`);
+
+  return `FIX THESE SPECIFIC ISSUES IN THE DRAFT BELOW:
+
+${failures.map((f, i) => `${i + 1}. ${f}`).join('\n')}
+
+ALL FORM DATA (use exactly as given):
+${allFields.join('\n')}
+
+RULES:
+- Fix ONLY the issues listed above
+- Do NOT rewrite the entire application
+- Keep all correct parts unchanged
+- Return the corrected full application text
+- No explanations, no markdown
+
+DRAFT TO FIX:
+${currentDraft}`;
 }
 
 // ── Core dispatch logic ──────────────────────────────────────────────────

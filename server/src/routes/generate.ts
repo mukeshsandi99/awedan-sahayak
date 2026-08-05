@@ -85,7 +85,7 @@ generateRouter.post('/generate-application', async (req: Request, res: Response)
       formData,
     });
 
-    log.info(`[POST /generate-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed})`);
+    log.info(`[POST /generate-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed}, repair=${result.repairApplied ?? false}, qScore=${result.qualityScore ?? 'N/A'})`);
     res.json({
       success: true,
       generatedText: result.generatedText,
@@ -95,6 +95,9 @@ generateRouter.post('/generate-application', async (req: Request, res: Response)
         usage: result.usage,
         fallbackUsed: result.fallbackUsed,
         durationMs: result.durationMs,
+        qualityScore: result.qualityScore,
+        repairApplied: result.repairApplied ?? false,
+        refinementAvailable: result.refinementAvailable ?? false,
       },
     });
   } catch (err: any) {
@@ -171,7 +174,7 @@ generateRouter.post('/generate-custom-application', async (req: Request, res: Re
       formData: enrichedFormData,
     });
 
-    log.info(`[POST /generate-custom-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed})`);
+    log.info(`[POST /generate-custom-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed}, repair=${result.repairApplied ?? false})`);
     res.json({
       success: true,
       generatedText: result.generatedText,
@@ -182,6 +185,9 @@ generateRouter.post('/generate-custom-application', async (req: Request, res: Re
         isCustom: true,
         fallbackUsed: result.fallbackUsed,
         durationMs: result.durationMs,
+        qualityScore: result.qualityScore,
+        repairApplied: result.repairApplied ?? false,
+        refinementAvailable: result.refinementAvailable ?? false,
       },
     });
   } catch (err: any) {
