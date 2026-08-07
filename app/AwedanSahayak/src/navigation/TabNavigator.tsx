@@ -3,6 +3,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 
 import HomeStack from './HomeStack';
+import ToolsStack from './ToolsStack';
 import MyApplicationsStack from './MyApplicationsStack';
 import OfficeDirectoryScreen from '../screens/OfficeDirectoryScreen';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -11,6 +12,7 @@ const Tab = createBottomTabNavigator();
 
 const TAB_ICONS: Record<string, { focused: keyof typeof Ionicons.glyphMap; default: keyof typeof Ionicons.glyphMap }> = {
   Home: { focused: 'home', default: 'home-outline' },
+  Tools: { focused: 'apps', default: 'apps-outline' },
   MyApplications: { focused: 'document-text', default: 'document-text-outline' },
   OfficeDirectory: { focused: 'business', default: 'business-outline' },
   Profile: { focused: 'person-circle', default: 'person-circle-outline' },
@@ -45,6 +47,11 @@ export default function TabNavigator() {
         name="Home"
         component={HomeStack}
         options={{ tabBarLabel: 'होम' }}
+      />
+      <Tab.Screen
+        name="Tools"
+        component={ToolsStack}
+        options={{ tabBarLabel: 'उपकरण' }}
       />
       <Tab.Screen
         name="MyApplications"

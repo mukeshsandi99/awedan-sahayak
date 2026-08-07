@@ -27,6 +27,7 @@ import { generatePdf, sharePdf, isSaveSupported } from '../services/pdf';
 import { generateRtf, shareRtf } from '../services/rtf';
 import { scheduleReminder, cancelScheduledReminder } from '../services/reminders';
 import { updateGeneratedApplication, getGeneratedApplicationById } from '../database/db';
+import MultiPagePdfViewer from '../components/pdf/MultiPagePdfViewer';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -267,18 +268,27 @@ export function ApplicationPreviewContent({
         )}
       </View>
 
-      {/* Application text */}
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={true}
-      >
-        <View style={styles.textCard}>
-          <Text style={styles.applicationText} selectable>
-            {generatedText}
-          </Text>
+      {/* Application text or PDF preview */}
+      {pdfUri ? (
+        <View style={styles.pdfViewerContainer}>
+          <MultiPagePdfViewer
+            uri={pdfUri}
+            onError={(e) => console.warn('[Preview] PDF viewer error:', e)}
+          />
         </View>
-      </ScrollView>
+      ) : (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={true}
+        >
+          <View style={styles.textCard}>
+            <Text style={styles.applicationText} selectable>
+              {generatedText}
+            </Text>
+          </View>
+        </ScrollView>
+      )}
 
       {/* Action bar */}
       <View style={styles.actionBar}>
@@ -542,6 +552,13 @@ const styles = StyleSheet.create({
   },
 
   // Text body
+  pdfViewerContainer: {
+    flex: 1,
+    marginHorizontal: 8,
+    marginVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
   scroll: {
     flex: 1,
   },

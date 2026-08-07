@@ -25,6 +25,7 @@ import {
   TextInput,
   Animated,
   Keyboard,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -35,6 +36,8 @@ import { generatePdf, sharePdf, isSaveSupported } from '../services/pdf';
 import { generateRtf, shareRtf } from '../services/rtf';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { ExpoSpeechRecognitionModule } from 'expo-speech-recognition';
+import DocumentCornerDetector, { Corners } from '../components/scanner/DocumentCornerDetector';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -46,13 +49,17 @@ type Props = NativeStackScreenProps<HomeStackParamList, 'HandwritingScan'>;
 // ── Component ───────────────────────────────────────────────────────
 
 export default function HandwritingScanScreen({ navigation }: Props) {
-  const [phase, setPhase] = useState<'info' | 'scanning' | 'editing'>('info');
+  const [phase, setPhase] = useState<'info' | 'scanning' | 'adjusting' | 'editing'>('info');
   const [aiCleaning, setAiCleaning] = useState(false);
   const [aiCleaned, setAiCleaned] = useState(false);
   const [extractedText, setExtractedText] = useState('');
   const [editedText, setEditedText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Scanner: captured image for corner adjustment ──────────────────
+  const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
+  const [capturedImageSize, setCapturedImageSize] = useState({ width: 0, height: 0 });
 
   // ── PDF / RTF state ──────────────────────────────────────────────
 
@@ -231,43 +238,26 @@ export default function HandwritingScanScreen({ navigation }: Props) {
       }
 
       const imageUri = result.assets[0].uri;
-      setPhase('scanning');
-      setIsLoading(true);
-      setError(null);
 
-      try {
-        // 3. Read image as base64
-        const base64 = await FileSystem.readAsStringAsync(imageUri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-
-        // 4. Send to backend for OCR
-        console.log('[HandwritingScan] Sending image to backend for OCR...');
-        const apiResult = await scanDocument(base64);
-
-        if (!apiResult.ok) {
-          throw new Error(apiResult.error || `OCR failed`);
-        }
-
-        const text = apiResult.data?.rawText ?? '';
-
-        if (!text || text.trim().length === 0) {
-          setError(
-            'फोटो से कोई टेक्स्ट नहीं पढ़ा जा सका। कृपया साफ और सीधी फोटो लेकर पुनः प्रयास करें।\n\n' +
-            'No text could be read from the photo. Please take a clearer, straighter photo and try again.',
+      // ── Get EXIF-corrected dimensions ──────────────────────────
+      // result.assets[0].width/height may be the raw file dimensions
+      // without EXIF rotation applied. Image.getSize() returns the
+      // actual display dimensions (accounts for EXIF orientation).
+      // This prevents rotated/mirrored crop coordinates.
+      const displaySize = await new Promise<{ width: number; height: number }>(
+        (resolve) => {
+          Image.getSize(
+            imageUri,
+            (width, height) => resolve({ width, height }),
+            () => resolve({ width: result.assets[0].width || 1080, height: result.assets[0].height || 1440 }),
           );
-          setPhase('info');
-        } else {
-          setExtractedText(text);
-          setEditedText(text);
-          setPhase('editing');
-          console.log(`[HandwritingScan] OCR success — ${text.length} chars extracted.`);
-        }
-      } finally {
-        // 5. Delete temp image
-        try { await FileSystem.deleteAsync(imageUri, { idempotent: true }); } catch {}
-        setIsLoading(false);
-      }
+        },
+      );
+
+      setCapturedImageUri(imageUri);
+      setCapturedImageSize({ width: displaySize.width, height: displaySize.height });
+      setPhase('adjusting'); // Go to corner detection + crop
+      setError(null);
     } catch (err: any) {
       console.error('[HandwritingScan] Error:', err?.message);
 
@@ -284,6 +274,90 @@ export default function HandwritingScanScreen({ navigation }: Props) {
       setIsLoading(false);
       setPhase('info');
     }
+  }, []);
+
+  // ── Corner adjustment → crop → OCR ──────────────────────────────────
+
+  const handleCornerConfirm = useCallback(async (corners: Corners) => {
+    if (!capturedImageUri) return;
+    setPhase('scanning');
+    setIsLoading(true);
+    setCapturedImageUri(null);
+
+    try {
+      // Rectangular crop using bounding box of the 4 corners
+      const minX = Math.min(corners.topLeft.x, corners.bottomLeft.x);
+      const maxX = Math.max(corners.topRight.x, corners.bottomRight.x);
+      const minY = Math.min(corners.topLeft.y, corners.topRight.y);
+      const maxY = Math.max(corners.bottomLeft.y, corners.bottomRight.y);
+
+      const cropW = Math.max(100, maxX - minX);
+      const cropH = Math.max(100, maxY - minY);
+      const originX = Math.max(0, minX);
+      const originY = Math.max(0, minY);
+
+      // Use expo-image-manipulator for the crop
+      const cropped = await ImageManipulator.manipulateAsync(
+        capturedImageUri,
+        [{
+          crop: {
+            originX,
+            originY,
+            width: Math.min(cropW, capturedImageSize.width - originX),
+            height: Math.min(cropH, capturedImageSize.height - originY),
+          },
+        }],
+        { compress: 0.95, format: ImageManipulator.SaveFormat.JPEG },
+      );
+
+      // Read cropped image as base64
+      const base64 = await FileSystem.readAsStringAsync(cropped.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      // Clean up cropped temp
+      try { await FileSystem.deleteAsync(cropped.uri, { idempotent: true }); } catch {}
+
+      // Send to backend for OCR
+      console.log('[HandwritingScan] Sending cropped image to backend...');
+      const apiResult = await scanDocument(base64);
+
+      if (!apiResult.ok) {
+        throw new Error(apiResult.error || 'OCR failed');
+      }
+
+      const text = apiResult.data?.rawText ?? '';
+      if (!text || text.trim().length === 0) {
+        setError(
+          'फोटो से कोई टेक्स्ट नहीं पढ़ा जा सका। कृपया साफ और सीधी फोटो लेकर पुनः प्रयास करें।\n\n' +
+          'No text could be read from the photo. Please take a clearer, straighter photo and try again.',
+        );
+        setPhase('info');
+      } else {
+        setExtractedText(text);
+        setEditedText(text);
+        setPhase('editing');
+        console.log(`[HandwritingScan] OCR success — ${text.length} chars extracted.`);
+      }
+    } catch (err: any) {
+      console.error('[HandwritingScan] Error:', err?.message);
+      if (err instanceof FetchTimeoutError) {
+        const seconds = Math.round(err.timeoutMs / 1000);
+        setError(`⏳ सर्वर ने ${seconds} सेकंड से अधिक समय ले लिया। कृपया पुनः प्रयास करें।`);
+      } else {
+        setError(err?.message ?? 'Unknown error');
+      }
+      setPhase('info');
+    } finally {
+      // Delete original capture
+      try { await FileSystem.deleteAsync(capturedImageUri, { idempotent: true }); } catch {}
+      setIsLoading(false);
+    }
+  }, [capturedImageUri, capturedImageSize]);
+
+  const handleCornerCancel = useCallback(() => {
+    setCapturedImageUri(null);
+    setPhase('info');
   }, []);
 
   // ── Export actions (same pattern as ApplicationPreviewScreen) ─────
@@ -397,6 +471,20 @@ export default function HandwritingScanScreen({ navigation }: Props) {
     setAiCleaned(false);
     setPhase('info');
   }, []);
+
+  // ── Phase: Corner adjustment ─────────────────────────────────────
+
+  if (phase === 'adjusting' && capturedImageUri) {
+    return (
+      <DocumentCornerDetector
+        imageUri={capturedImageUri}
+        imageWidth={capturedImageSize.width || 1080}
+        imageHeight={capturedImageSize.height || 1440}
+        onConfirm={handleCornerConfirm}
+        onCancel={handleCornerCancel}
+      />
+    );
+  }
 
   // ── Phase: Info / Start ──────────────────────────────────────────
 

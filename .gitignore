@@ -38,3 +38,4 @@ yarn-error.log*
 
 app/AwedanSahayak/google-services.json
 server/data/token_ledger.json
+node_modules_disabled/

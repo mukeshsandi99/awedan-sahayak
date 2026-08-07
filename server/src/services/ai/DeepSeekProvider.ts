@@ -31,12 +31,18 @@ export class DeepSeekProvider implements IAIProvider {
     });
 
     try {
+      // ── DeepSeek: disable extended thinking ───────────────────────
+      // DeepSeek v4-flash defaults to extended thinking ON, which consumes
+      // the entire max_tokens budget on thinking blocks, leaving zero
+      // tokens for the actual text output. We disable thinking entirely —
+      // the buildSystemPrompt() already provides detailed instructions.
       const response = await client.messages.create({
         model: this.model,
-        max_tokens: request.maxTokens ?? 1200,
+        max_tokens: request.maxTokens ?? 4000,
         system: request.systemPrompt,
         messages: [{ role: 'user', content: request.userMessage }],
         temperature: request.temperature,
+        thinking: { type: 'disabled' },
       });
 
       const text = extractText(response.content);

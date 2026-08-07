@@ -161,6 +161,82 @@ export default function HomeScreen({ navigation }: Props) {
         </Text>
       </View>
 
+      {/* ── New Tools Section Cards ───────────────────────────── */}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>सुरक्षा उपकरण</Text>
+      </View>
+      <View style={styles.toolRow}>
+        <TouchableOpacity
+          style={[styles.toolChip, { borderColor: '#D63031' }]}
+          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'ScamCheck' })}
+        >
+          <Ionicons name="shield-checkmark" size={18} color="#D63031" />
+          <Text style={styles.toolChipText}>सुरक्षा जांच</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toolChip, { borderColor: '#2D3436' }]}
+          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'BarcodeScanner' })}
+        >
+          <Ionicons name="scan-outline" size={18} color="#2D3436" />
+          <Text style={styles.toolChipText}>स्कैनर</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>उपयोगी उपकरण</Text>
+      </View>
+      <View style={styles.toolRow}>
+        <TouchableOpacity
+          style={[styles.toolChip, { borderColor: '#E84393' }]}
+          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'BiodataForm', params: {} })}
+        >
+          <Ionicons name="people" size={18} color="#E84393" />
+          <Text style={styles.toolChipText}>बायोडाटा</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toolChip, { borderColor: '#0984E3' }]}
+          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'CgpaCalculator' })}
+        >
+          <Ionicons name="calculator" size={18} color="#0984E3" />
+          <Text style={styles.toolChipText}>CGPA</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toolChip, { borderColor: '#6C5CE7' }]}
+          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'HandwritingInput', params: {} })}
+        >
+          <Ionicons name="create" size={18} color="#6C5CE7" />
+          <Text style={styles.toolChipText}>हस्तलिखित</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.toolChip, { borderColor: '#00B894' }]}
+          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'BarcodeGenerator' })}
+        >
+          <Ionicons name="qr-code" size={18} color="#00B894" />
+          <Text style={styles.toolChipText}>QR</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>न्यायालय</Text>
+      </View>
+      <TouchableOpacity
+        style={styles.courtCard}
+        activeOpacity={0.7}
+        onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'CourtPetitionList' })}
+      >
+        <View style={[styles.courtIconCircle]}>
+          <Ionicons name="scale" size={28} color="#FFFFFF" />
+        </View>
+        <View style={styles.scanTextGroup}>
+          <Text style={styles.scanCardTitle}>न्यायालय याचिकाएं</Text>
+          <Text style={styles.scanCardSubtitle}>Court Petitions</Text>
+          <Text style={styles.scanCardHint}>
+            जमानत, वाद पत्र, निषेधाज्ञा, शपथ पत्र व अन्य न्यायालयीन आवेदन
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={22} color="#CCC" />
+      </TouchableOpacity>
+
       {/* Custom / Blank application card */}
       <TouchableOpacity
         style={styles.customCard}
@@ -244,6 +320,72 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginTop: 2,
+  },
+
+  // ── New tool section styles ─────────────────────────
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1A1A2E',
+  },
+  toolRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 16,
+    marginBottom: 4,
+  },
+  toolChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  toolChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1A1A2E',
+  },
+  courtCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 16,
+    padding: 16,
+    gap: 14,
+    borderWidth: 1.5,
+    borderColor: '#D63031',
+    shadowColor: '#D63031',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  courtIconCircle: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: '#D63031',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // Disclaimer banner

@@ -17,6 +17,18 @@ import {
   GeneratedApplicationInsert,
   OfficeType,
   SubscriptionStatus,
+  SafetyCheck,
+  SafetyCheckInsert,
+  MarriageBiodataDraft,
+  MarriageBiodataDraftInsert,
+  BarcodeHistory,
+  BarcodeHistoryInsert,
+  CgpaHistory,
+  CgpaHistoryInsert,
+  HandwritingDocument,
+  HandwritingDocumentInsert,
+  CourtPetitionDraft,
+  CourtPetitionDraftInsert,
 } from '../types/database';
 import { OFFICE_SEEDS, APPLICATION_TYPE_SEEDS } from './seed';
 import { NEW_TEMPLATES } from './seed-expansion';
@@ -172,6 +184,9 @@ export async function initDatabase(): Promise<void> {
 
   // Migration: add transport office type (15th office type)
   await migrateTransportOfficeType();
+
+  // Migration: v2 expansion — new feature tables (safety, biodata, barcode, CGPA, handwriting, court)
+  await migrateV2ExpansionTables();
 
   // Create indexes for common queries
   await db.execAsync(`CREATE INDEX IF NOT EXISTS idx_offices_type ON offices(type);`);
@@ -1283,5 +1298,481 @@ export async function deleteGeneratedApplication(id: number): Promise<boolean> {
     id,
   );
   const result = await getDb().runAsync('DELETE FROM generated_applications WHERE id = ?;', id);
+  return (result.changes ?? 0) > 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// V2 EXPANSION — New feature tables (safety, biodata, barcode, CGPA,
+// handwriting, court petitions). Safe to call on every app launch.
+// ═══════════════════════════════════════════════════════════════════════
+
+const V2_MIGRATION_KEY = 'v2_expansion_tables_v1';
+
+async function migrateV2ExpansionTables(): Promise<void> {
+  await ensureSchemaMigrationsTable();
+
+  if (await hasMigration(V2_MIGRATION_KEY)) {
+    console.log('[DB] V2 expansion tables already migrated — skipping.');
+    return;
+  }
+
+  const database = getDb();
+  console.log('[DB] Running V2 expansion migration (6 new tables)...');
+
+  try {
+    // ── safety_checks ──────────────────────────────────────────────
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS safety_checks (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        input_type  TEXT    NOT NULL CHECK(input_type IN ('url','upi','mobile','payment_text','qr_result')),
+        input_value TEXT    NOT NULL,
+        risk_level  TEXT    NOT NULL CHECK(risk_level IN ('low','caution','high')),
+        reasons     TEXT,
+        created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+
+    // ── marriage_biodata_drafts ────────────────────────────────────
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS marriage_biodata_drafts (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        full_name         TEXT,
+        photo_uri         TEXT,
+        dob               TEXT,
+        age               INTEGER,
+        height            TEXT,
+        gender            TEXT,
+        religion          TEXT,
+        caste             TEXT,
+        gotra             TEXT,
+        education         TEXT,
+        occupation        TEXT,
+        income            TEXT,
+        father_name       TEXT,
+        mother_name       TEXT,
+        family_details    TEXT,
+        address           TEXT,
+        contact_details   TEXT,
+        siblings          TEXT,
+        hobbies           TEXT,
+        expectations      TEXT,
+        horoscope_details TEXT,
+        template_style    TEXT    NOT NULL DEFAULT 'simple',
+        language          TEXT    NOT NULL DEFAULT 'hi',
+        is_draft          INTEGER NOT NULL DEFAULT 1,
+        created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+
+    // ── barcode_history ────────────────────────────────────────────
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS barcode_history (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        barcode_type TEXT    NOT NULL,
+        raw_value    TEXT    NOT NULL,
+        scanned_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+
+    // ── cgpa_history ───────────────────────────────────────────────
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS cgpa_history (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        mode         TEXT    NOT NULL CHECK(mode IN ('cgpa_to_percent','percent_to_cgpa')),
+        input_value  REAL    NOT NULL,
+        result_value REAL    NOT NULL,
+        formula_used TEXT    NOT NULL,
+        created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+
+    // ── handwriting_documents ──────────────────────────────────────
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS handwriting_documents (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        title             TEXT,
+        input_text        TEXT    NOT NULL,
+        page_style        TEXT    NOT NULL DEFAULT 'ruled',
+        ink_color         TEXT    NOT NULL DEFAULT 'blue',
+        font_size         INTEGER NOT NULL DEFAULT 18,
+        line_spacing      REAL    NOT NULL DEFAULT 1.8,
+        page_margin       INTEGER NOT NULL DEFAULT 40,
+        watermark_enabled INTEGER NOT NULL DEFAULT 1,
+        language          TEXT    NOT NULL DEFAULT 'hi',
+        pdf_path          TEXT,
+        image_path        TEXT,
+        created_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+
+    // ── court_petition_drafts ──────────────────────────────────────
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS court_petition_drafts (
+        id                            INTEGER PRIMARY KEY AUTOINCREMENT,
+        petition_type                 TEXT    NOT NULL,
+        court_name                    TEXT,
+        district                      TEXT,
+        case_type                     TEXT,
+        case_number                   TEXT,
+        year                          TEXT,
+        petitioner_name               TEXT,
+        respondent_name               TEXT,
+        advocate_name                 TEXT,
+        police_station                TEXT,
+        fir_number                    TEXT,
+        sections_of_law               TEXT,
+        date_of_occurrence            TEXT,
+        custody_date                  TEXT,
+        facts_of_case                 TEXT,
+        grounds                       TEXT,
+        prayer                        TEXT,
+        verification_text             TEXT,
+        place                         TEXT,
+        date                          TEXT,
+        cause_of_action               TEXT,
+        jurisdiction                  TEXT,
+        valuation                     TEXT,
+        court_fee                     TEXT,
+        property_schedule             TEXT,
+        relief_sought                 TEXT,
+        limitation_statement          TEXT,
+        document_list                 TEXT,
+        criminal_history              TEXT,
+        cooperation_assurance         TEXT,
+        flight_risk_statement         TEXT,
+        evidence_tampering_assurance  TEXT,
+        medical_family_grounds        TEXT,
+        co_accused_parity             TEXT,
+        reviewed_by_advocate          INTEGER NOT NULL DEFAULT 0,
+        is_draft                      INTEGER NOT NULL DEFAULT 1,
+        generated_text                TEXT,
+        pdf_path                      TEXT,
+        created_at                    TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at                    TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+
+    // ── Record migration ───────────────────────────────────────────
+    await recordMigration(V2_MIGRATION_KEY);
+    // Bump schema version
+    await setMetadata('schema_version', '2');
+    console.log('[DB] ✅ V2 expansion migration complete — 6 new tables created, schema_version=2.');
+  } catch (err: any) {
+    console.error('[DB] ❌ V2 expansion migration failed:', err?.message);
+    throw err;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SAFETY CHECKS CRUD
+// ═══════════════════════════════════════════════════════════════════════
+
+export async function insertSafetyCheck(check: SafetyCheckInsert): Promise<SafetyCheck> {
+  const result = await getDb().runAsync(
+    `INSERT INTO safety_checks (input_type, input_value, risk_level, reasons)
+     VALUES (?, ?, ?, ?);`,
+    check.input_type, check.input_value, check.risk_level, check.reasons,
+  );
+  const row = await getDb().getFirstAsync<SafetyCheck>(
+    'SELECT * FROM safety_checks WHERE id = ?;', result.lastInsertRowId,
+  );
+  return row!;
+}
+
+export async function getSafetyChecks(limit: number = 50): Promise<SafetyCheck[]> {
+  return getDb().getAllAsync<SafetyCheck>(
+    'SELECT * FROM safety_checks ORDER BY created_at DESC LIMIT ?;', limit,
+  );
+}
+
+export async function deleteSafetyCheck(id: number): Promise<boolean> {
+  const result = await getDb().runAsync('DELETE FROM safety_checks WHERE id = ?;', id);
+  return (result.changes ?? 0) > 0;
+}
+
+export async function clearSafetyChecks(): Promise<void> {
+  await getDb().runAsync('DELETE FROM safety_checks;');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// MARRIAGE BIODATA CRUD
+// ═══════════════════════════════════════════════════════════════════════
+
+export async function insertBiodataDraft(draft: MarriageBiodataDraftInsert): Promise<MarriageBiodataDraft> {
+  const result = await getDb().runAsync(
+    `INSERT INTO marriage_biodata_drafts
+       (full_name, photo_uri, dob, age, height, gender, religion, caste, gotra,
+        education, occupation, income, father_name, mother_name, family_details,
+        address, contact_details, siblings, hobbies, expectations, horoscope_details,
+        template_style, language, is_draft)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);`,
+    draft.full_name, draft.photo_uri, draft.dob, draft.age, draft.height,
+    draft.gender, draft.religion, draft.caste, draft.gotra, draft.education,
+    draft.occupation, draft.income, draft.father_name, draft.mother_name,
+    draft.family_details, draft.address, draft.contact_details, draft.siblings,
+    draft.hobbies, draft.expectations, draft.horoscope_details,
+    draft.template_style, draft.language, draft.is_draft,
+  );
+  const row = await getDb().getFirstAsync<MarriageBiodataDraft>(
+    'SELECT * FROM marriage_biodata_drafts WHERE id = ?;', result.lastInsertRowId,
+  );
+  return row!;
+}
+
+export async function updateBiodataDraft(id: number, fields: Partial<MarriageBiodataDraftInsert & { is_draft: number }>): Promise<MarriageBiodataDraft | null> {
+  const existing = await getDb().getFirstAsync<MarriageBiodataDraft>(
+    'SELECT * FROM marriage_biodata_drafts WHERE id = ?;', id,
+  );
+  if (!existing) return null;
+
+  const merge = (key: string): any =>
+    (fields as any)[key] !== undefined ? (fields as any)[key] : (existing as any)[key];
+
+  await getDb().runAsync(
+    `UPDATE marriage_biodata_drafts SET
+       full_name=?, photo_uri=?, dob=?, age=?, height=?, gender=?, religion=?,
+       caste=?, gotra=?, education=?, occupation=?, income=?, father_name=?,
+       mother_name=?, family_details=?, address=?, contact_details=?, siblings=?,
+       hobbies=?, expectations=?, horoscope_details=?, template_style=?, language=?,
+       is_draft=?, updated_at=datetime('now')
+     WHERE id=?;`,
+    merge('full_name'), merge('photo_uri'), merge('dob'), merge('age'), merge('height'),
+    merge('gender'), merge('religion'), merge('caste'), merge('gotra'), merge('education'),
+    merge('occupation'), merge('income'), merge('father_name'), merge('mother_name'),
+    merge('family_details'), merge('address'), merge('contact_details'), merge('siblings'),
+    merge('hobbies'), merge('expectations'), merge('horoscope_details'),
+    merge('template_style'), merge('language'), merge('is_draft'), id,
+  );
+  return getDb().getFirstAsync<MarriageBiodataDraft>(
+    'SELECT * FROM marriage_biodata_drafts WHERE id = ?;', id,
+  );
+}
+
+export async function getBiodataDrafts(): Promise<MarriageBiodataDraft[]> {
+  return getDb().getAllAsync<MarriageBiodataDraft>(
+    'SELECT * FROM marriage_biodata_drafts ORDER BY updated_at DESC;',
+  );
+}
+
+export async function getBiodataDraftById(id: number): Promise<MarriageBiodataDraft | null> {
+  return getDb().getFirstAsync<MarriageBiodataDraft>(
+    'SELECT * FROM marriage_biodata_drafts WHERE id = ?;', id,
+  );
+}
+
+export async function deleteBiodataDraft(id: number): Promise<boolean> {
+  const result = await getDb().runAsync('DELETE FROM marriage_biodata_drafts WHERE id = ?;', id);
+  return (result.changes ?? 0) > 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// BARCODE HISTORY CRUD
+// ═══════════════════════════════════════════════════════════════════════
+
+export async function insertBarcodeHistory(entry: BarcodeHistoryInsert): Promise<BarcodeHistory> {
+  const result = await getDb().runAsync(
+    `INSERT INTO barcode_history (barcode_type, raw_value) VALUES (?, ?);`,
+    entry.barcode_type, entry.raw_value,
+  );
+  const row = await getDb().getFirstAsync<BarcodeHistory>(
+    'SELECT * FROM barcode_history WHERE id = ?;', result.lastInsertRowId,
+  );
+  return row!;
+}
+
+export async function getBarcodeHistory(limit: number = 50): Promise<BarcodeHistory[]> {
+  return getDb().getAllAsync<BarcodeHistory>(
+    'SELECT * FROM barcode_history ORDER BY scanned_at DESC LIMIT ?;', limit,
+  );
+}
+
+export async function deleteBarcodeHistory(id: number): Promise<boolean> {
+  const result = await getDb().runAsync('DELETE FROM barcode_history WHERE id = ?;', id);
+  return (result.changes ?? 0) > 0;
+}
+
+export async function clearBarcodeHistory(): Promise<void> {
+  await getDb().runAsync('DELETE FROM barcode_history;');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CGPA HISTORY CRUD
+// ═══════════════════════════════════════════════════════════════════════
+
+export async function insertCgpaHistory(entry: CgpaHistoryInsert): Promise<CgpaHistory> {
+  const result = await getDb().runAsync(
+    `INSERT INTO cgpa_history (mode, input_value, result_value, formula_used)
+     VALUES (?, ?, ?, ?);`,
+    entry.mode, entry.input_value, entry.result_value, entry.formula_used,
+  );
+  const row = await getDb().getFirstAsync<CgpaHistory>(
+    'SELECT * FROM cgpa_history WHERE id = ?;', result.lastInsertRowId,
+  );
+  return row!;
+}
+
+export async function getCgpaHistory(limit: number = 50): Promise<CgpaHistory[]> {
+  return getDb().getAllAsync<CgpaHistory>(
+    'SELECT * FROM cgpa_history ORDER BY created_at DESC LIMIT ?;', limit,
+  );
+}
+
+export async function clearCgpaHistory(): Promise<void> {
+  await getDb().runAsync('DELETE FROM cgpa_history;');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// HANDWRITING DOCUMENTS CRUD
+// ═══════════════════════════════════════════════════════════════════════
+
+export async function insertHandwritingDocument(doc: HandwritingDocumentInsert): Promise<HandwritingDocument> {
+  const result = await getDb().runAsync(
+    `INSERT INTO handwriting_documents
+       (title, input_text, page_style, ink_color, font_size, line_spacing,
+        page_margin, watermark_enabled, language, pdf_path, image_path)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?);`,
+    doc.title, doc.input_text, doc.page_style, doc.ink_color, doc.font_size,
+    doc.line_spacing, doc.page_margin, doc.watermark_enabled, doc.language,
+    doc.pdf_path, doc.image_path,
+  );
+  const row = await getDb().getFirstAsync<HandwritingDocument>(
+    'SELECT * FROM handwriting_documents WHERE id = ?;', result.lastInsertRowId,
+  );
+  return row!;
+}
+
+export async function updateHandwritingDocument(id: number, fields: Partial<HandwritingDocumentInsert>): Promise<HandwritingDocument | null> {
+  const existing = await getDb().getFirstAsync<HandwritingDocument>(
+    'SELECT * FROM handwriting_documents WHERE id = ?;', id,
+  );
+  if (!existing) return null;
+
+  const m = (key: string): any =>
+    (fields as any)[key] !== undefined ? (fields as any)[key] : (existing as any)[key];
+
+  await getDb().runAsync(
+    `UPDATE handwriting_documents SET
+       title=?, input_text=?, page_style=?, ink_color=?, font_size=?, line_spacing=?,
+       page_margin=?, watermark_enabled=?, language=?, pdf_path=?, image_path=?
+     WHERE id=?;`,
+    m('title'), m('input_text'), m('page_style'), m('ink_color'), m('font_size'),
+    m('line_spacing'), m('page_margin'), m('watermark_enabled'), m('language'),
+    m('pdf_path'), m('image_path'), id,
+  );
+  return getDb().getFirstAsync<HandwritingDocument>(
+    'SELECT * FROM handwriting_documents WHERE id = ?;', id,
+  );
+}
+
+export async function getHandwritingDocuments(): Promise<HandwritingDocument[]> {
+  return getDb().getAllAsync<HandwritingDocument>(
+    'SELECT * FROM handwriting_documents ORDER BY created_at DESC;',
+  );
+}
+
+export async function getHandwritingDocumentById(id: number): Promise<HandwritingDocument | null> {
+  return getDb().getFirstAsync<HandwritingDocument>(
+    'SELECT * FROM handwriting_documents WHERE id = ?;', id,
+  );
+}
+
+export async function deleteHandwritingDocument(id: number): Promise<boolean> {
+  const result = await getDb().runAsync('DELETE FROM handwriting_documents WHERE id = ?;', id);
+  return (result.changes ?? 0) > 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// COURT PETITION DRAFTS CRUD
+// ═══════════════════════════════════════════════════════════════════════
+
+export async function insertCourtPetition(petition: CourtPetitionDraftInsert): Promise<CourtPetitionDraft> {
+  const result = await getDb().runAsync(
+    `INSERT INTO court_petition_drafts
+       (petition_type, court_name, district, case_type, case_number, year,
+        petitioner_name, respondent_name, advocate_name, police_station,
+        fir_number, sections_of_law, date_of_occurrence, custody_date,
+        facts_of_case, grounds, prayer, verification_text, place, date,
+        cause_of_action, jurisdiction, valuation, court_fee, property_schedule,
+        relief_sought, limitation_statement, document_list,
+        criminal_history, cooperation_assurance, flight_risk_statement,
+        evidence_tampering_assurance, medical_family_grounds, co_accused_parity,
+        reviewed_by_advocate, is_draft, generated_text, pdf_path)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);`,
+    petition.petition_type, petition.court_name, petition.district,
+    petition.case_type, petition.case_number, petition.year,
+    petition.petitioner_name, petition.respondent_name, petition.advocate_name,
+    petition.police_station, petition.fir_number, petition.sections_of_law,
+    petition.date_of_occurrence, petition.custody_date,
+    petition.facts_of_case, petition.grounds, petition.prayer,
+    petition.verification_text, petition.place, petition.date,
+    petition.cause_of_action, petition.jurisdiction, petition.valuation,
+    petition.court_fee, petition.property_schedule, petition.relief_sought,
+    petition.limitation_statement, petition.document_list,
+    petition.criminal_history, petition.cooperation_assurance,
+    petition.flight_risk_statement, petition.evidence_tampering_assurance,
+    petition.medical_family_grounds, petition.co_accused_parity,
+    petition.reviewed_by_advocate, petition.is_draft,
+    petition.generated_text, petition.pdf_path,
+  );
+  const row = await getDb().getFirstAsync<CourtPetitionDraft>(
+    'SELECT * FROM court_petition_drafts WHERE id = ?;', result.lastInsertRowId,
+  );
+  return row!;
+}
+
+export async function updateCourtPetition(id: number, fields: Partial<CourtPetitionDraftInsert & { is_draft: number; reviewed_by_advocate: number; generated_text: string; pdf_path: string }>): Promise<CourtPetitionDraft | null> {
+  const existing = await getDb().getFirstAsync<CourtPetitionDraft>(
+    'SELECT * FROM court_petition_drafts WHERE id = ?;', id,
+  );
+  if (!existing) return null;
+
+  const m = (key: string): any =>
+    (fields as any)[key] !== undefined ? (fields as any)[key] : (existing as any)[key];
+
+  await getDb().runAsync(
+    `UPDATE court_petition_drafts SET
+       petition_type=?, court_name=?, district=?, case_type=?, case_number=?, year=?,
+       petitioner_name=?, respondent_name=?, advocate_name=?, police_station=?,
+       fir_number=?, sections_of_law=?, date_of_occurrence=?, custody_date=?,
+       facts_of_case=?, grounds=?, prayer=?, verification_text=?, place=?, date=?,
+       cause_of_action=?, jurisdiction=?, valuation=?, court_fee=?, property_schedule=?,
+       relief_sought=?, limitation_statement=?, document_list=?,
+       criminal_history=?, cooperation_assurance=?, flight_risk_statement=?,
+       evidence_tampering_assurance=?, medical_family_grounds=?, co_accused_parity=?,
+       reviewed_by_advocate=?, is_draft=?, generated_text=?, pdf_path=?,
+       updated_at=datetime('now')
+     WHERE id=?;`,
+    m('petition_type'), m('court_name'), m('district'), m('case_type'),
+    m('case_number'), m('year'), m('petitioner_name'), m('respondent_name'),
+    m('advocate_name'), m('police_station'), m('fir_number'), m('sections_of_law'),
+    m('date_of_occurrence'), m('custody_date'), m('facts_of_case'), m('grounds'),
+    m('prayer'), m('verification_text'), m('place'), m('date'),
+    m('cause_of_action'), m('jurisdiction'), m('valuation'), m('court_fee'),
+    m('property_schedule'), m('relief_sought'), m('limitation_statement'),
+    m('document_list'), m('criminal_history'), m('cooperation_assurance'),
+    m('flight_risk_statement'), m('evidence_tampering_assurance'),
+    m('medical_family_grounds'), m('co_accused_parity'),
+    m('reviewed_by_advocate'), m('is_draft'), m('generated_text'), m('pdf_path'), id,
+  );
+  return getDb().getFirstAsync<CourtPetitionDraft>(
+    'SELECT * FROM court_petition_drafts WHERE id = ?;', id,
+  );
+}
+
+export async function getCourtPetitions(): Promise<CourtPetitionDraft[]> {
+  return getDb().getAllAsync<CourtPetitionDraft>(
+    'SELECT * FROM court_petition_drafts ORDER BY updated_at DESC;',
+  );
+}
+
+export async function getCourtPetitionById(id: number): Promise<CourtPetitionDraft | null> {
+  return getDb().getFirstAsync<CourtPetitionDraft>(
+    'SELECT * FROM court_petition_drafts WHERE id = ?;', id,
+  );
+}
+
+export async function deleteCourtPetition(id: number): Promise<boolean> {
+  const result = await getDb().runAsync('DELETE FROM court_petition_drafts WHERE id = ?;', id);
   return (result.changes ?? 0) > 0;
 }
