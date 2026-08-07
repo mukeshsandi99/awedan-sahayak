@@ -21,8 +21,8 @@ export const AIConfig = {
   get rateLimitMaxDelayMs() { return parseInt(process.env.AI_RATELIMIT_MAX_DELAY_MS ?? '20000', 10); },
 
   // ── Timeouts ─────────────────────────────────────────────────────
-  get requestTimeoutMs() { return parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? '45000', 10); },
-  get totalTimeoutMs() { return parseInt(process.env.AI_TOTAL_TIMEOUT_MS ?? '70000', 10); },
+  get requestTimeoutMs() { return parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? '90000', 10); },
+  get totalTimeoutMs() { return parseInt(process.env.AI_TOTAL_TIMEOUT_MS ?? '120000', 10); },
 
   // ── Limits ───────────────────────────────────────────────────────
   get maxFieldLength() { return parseInt(process.env.AI_MAX_FIELD_LENGTH ?? '5000', 10); },
