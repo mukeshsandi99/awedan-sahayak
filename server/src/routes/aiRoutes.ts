@@ -12,6 +12,29 @@ import { Router, Request, Response } from 'express';
 
 export const aiRouter = Router();
 
+// ── Fact block builder ──────────────────────────────────────────────
+
+const FACT_LABELS: Record<string, string> = {
+  applicant_name: '\u0928\u093E\u092E', father_name: '\u092A\u093F\u0924\u093E/\u092A\u0924\u093F \u0915\u093E \u0928\u093E\u092E',
+  parent_spouse_name: '\u092A\u093F\u0924\u093E/\u092A\u0924\u093F \u0915\u093E \u0928\u093E\u092E',
+  village: '\u0917\u093E\u0901\u0935', thana: '\u0925\u093E\u0928\u093E', district: '\u091C\u093F\u0932\u093E',
+  state: '\u0930\u093E\u091C\u094D\u092F', mobile: '\u092E\u094B\u092C\u093E\u0907\u0932',
+  phone: '\u092E\u094B\u092C\u093E\u0907\u0932', gender: '\u0932\u093F\u0902\u0917',
+  age: '\u0906\u092F\u0941', dob: '\u091C\u0928\u094D\u092E \u0924\u093F\u0925\u093F',
+  address: '\u092A\u0924\u093E', occupation: '\u0935\u094D\u092F\u0935\u0938\u093E\u092F',
+  income: '\u0906\u092F', religion: '\u0927\u0930\u094D\u092E', caste: '\u091C\u093E\u0924\u093F',
+};
+function buildFactBlock(formData: Record<string, string>): string {
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(formData)) {
+    if (value && String(value).trim()) {
+      const label = FACT_LABELS[key] || key;
+      lines.push(`${label}: ${String(value).trim()}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 // ── Unified AI call helper ─────────────────────────────────────────
 
 async function callAi(systemPrompt: string, userMessage: string, maxTokens: number = 8000): Promise<string> {
@@ -19,7 +42,6 @@ async function callAi(systemPrompt: string, userMessage: string, maxTokens: numb
   const config = getActiveConfig();
 
   if (config.provider === 'deepseek') {
-    // Use official DeepSeek OpenAI-compatible endpoint
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) throw new Error('DEEPSEEK_API_KEY not configured');
 
@@ -52,6 +74,9 @@ async function callAi(systemPrompt: string, userMessage: string, maxTokens: numb
 
     const data: any = await response.json();
     const content: string = data.choices?.[0]?.message?.content ?? '';
+    const hasNonAscii = [...content].some((c: string) => c.charCodeAt(0) > 127);
+    const qCount = (content.match(/\?/g) || []).length;
+    console.log(`[callAi] chars=${content.length} nonAscii=${hasNonAscii} qmarks=${qCount} preview=${JSON.stringify(content.substring(0, 40))}`);
     return content.replace(/\*\*/g, '').replace(/__/g, '');
   }
 
@@ -93,28 +118,18 @@ aiRouter.post('/generate-custom-application', async (req: Request, res: Response
     return;
   }
 
-  const sysPrompt = `आप एक अनुभवी सरकारी आवेदन पत्र लेखक हैं। आपका कार्य उपयोगकर्ता द्वारा दिए गए विवरण के आधार पर एक औपचारिक हिंदी आवेदन पत्र (प्रार्थना पत्र) तैयार करना है।
+  const designation = recipientDesignation || '\u0938\u0902\u092C\u0902\u0927\u093F\u0924 \u0905\u0927\u093F\u0915\u093E\u0930\u0940';
+  const factBlock = buildFactBlock(formData);
 
-संरचना नियम:
-1. "सेवा में," से शुरू करें, फिर प्राप्तकर्ता का पदनाम और कार्यालय का नाम लिखें
-2. "विषय:" में आवेदन के उद्देश्य का एक-पंक्ति सारांश दें
-3. "महोदय," के बाद "सविनय निवेदन है कि..." से शुरू करें
-4. आवेदक का पूरा परिचय (नाम, पिता/पति का नाम, गाँव, जिला) दें
-5. समस्या या अनुरोध का विस्तृत वर्णन करें
-6. स्पष्ट कार्रवाई योग्य अनुरोध के साथ समाप्त करें
-7. "धन्यवाद" या "आभार" के साथ समाप्त करें और हस्ताक्षर/नाम/दिनांक दें
+  const sysPrompt = '\u0906\u092A \u0939\u093F\u0902\u0926\u0940 \u0938\u0930\u0915\u093E\u0930\u0940 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930 \u0932\u0947\u0916\u0915 \u0939\u0948\u0902\u0964 \u0928\u0940\u091A\u0947 "\u0905\u092A\u0930\u093F\u0935\u0930\u094D\u0924\u0928\u0940\u092F \u0924\u0925\u094D\u092F" \u092E\u0947\u0902 \u092A\u094D\u0930\u093E\u0930\u094D\u0925\u0940 \u0915\u0940 \u0938\u092D\u0940 \u091C\u093E\u0928\u0915\u093E\u0930\u0940 \u0926\u0940 \u0917\u0908 \u0939\u0948\u0964 \u0939\u0930 \u092E\u093E\u0928 \u0915\u094B \u091C\u094D\u092F\u094B\u0902 \u0915\u093E \u0924\u094D\u092F\u094B\u0902 \u0906\u0935\u0947\u0926\u0928 \u092E\u0947\u0902 \u0921\u093E\u0932\u0947\u0902\u0964 \u0915\u094B\u0908 \u0928\u093E\u092E, \u092A\u0924\u093E, \u0924\u093E\u0930\u0940\u0916, \u0930\u093E\u0936\u093F, \u0917\u093E\u0901\u0935, \u091C\u093F\u0932\u093E \u0928 \u092C\u0926\u0932\u0947\u0902\u0964 Dots, ??????, \u092F\u093E brackets \u0928 \u0932\u093F\u0916\u0947\u0902\u0964 \u091C\u094B \u0928\u0939\u0940\u0902 \u0926\u093F\u092F\u093E \u0917\u092F\u093E \u0909\u0938\u0947 \u091B\u094B\u0921\u093C \u0926\u0947\u0902\u0964 \u092E\u093E\u0930\u094D\u0915\u0921\u093E\u0909\u0928 \u0928\u0939\u0940\u0902, \u0915\u0947\u0935\u0932 \u0938\u093E\u0926\u093E \u092A\u093E\u0920\u0964';
 
-भाषा: शुद्ध, औपचारिक हिंदी। कोई मार्कडाउन नहीं, केवल सादा पाठ।`;
+  const userMsg = `\u092A\u094D\u0930\u093E\u092A\u094D\u0924\u0915\u0930\u094D\u0924\u093E: ${designation}, ${officeName}
+\u0906\u0935\u0947\u0926\u0928 \u0915\u093E \u0935\u093F\u0935\u0930\u0923: ${customDescription}
 
-  const designation = recipientDesignation || 'संबंधित अधिकारी';
-  const userMsg = `कार्यालय: ${officeName}
-प्राप्तकर्ता पदनाम: ${designation}
-आवेदन विवरण: ${customDescription}
+\u0905\u092A\u0930\u093F\u0935\u0930\u094D\u0924\u0928\u0940\u092F \u0924\u0925\u094D\u092F \u2014 \u0907\u0928\u094D\u0939\u0947\u0902 \u0905\u0915\u094D\u0937\u0930\u0936\u0903 \u0906\u0935\u0947\u0926\u0928 \u092E\u0947\u0902 \u0921\u093E\u0932\u0947\u0902, \u092C\u0926\u0932\u0947\u0902 \u0928\u0939\u0940\u0902:
+${factBlock}
 
-प्रार्थी की जानकारी:
-${Object.entries(formData).map(([k, v]) => `${k}: ${v}`).join('\n')}
-
-कृपया एक संपूर्ण औपचारिक हिंदी आवेदन पत्र तैयार करें।`;
+\u090A\u092A\u0930 \u0926\u093F\u090F \u0917\u090F \u0938\u092D\u0940 \u0924\u0925\u094D\u092F\u094B\u0902 \u0915\u094B \u091C\u094D\u092F\u094B\u0902 \u0915\u093E \u0924\u094D\u092F\u094B\u0902 \u0930\u0916\u0924\u0947 \u0939\u0941\u090F \u090F\u0915 \u0938\u0902\u092A\u0942\u0930\u094D\u0923 \u0914\u092A\u091A\u093E\u0930\u093F\u0915 \u0939\u093F\u0902\u0926\u0940 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930 \u0932\u093F\u0916\u0947\u0902\u0964`;
 
   try {
     const text = await callAi(sysPrompt, userMsg, 8000);
@@ -135,32 +150,27 @@ ${Object.entries(formData).map(([k, v]) => `${k}: ${v}`).join('\n')}
 
 aiRouter.post('/revise-application', async (req: Request, res: Response) => {
   console.log('[POST /revise-application] Received.');
-  const { originalText, correctionInstruction, originalFormData, applicationName, officeType } = req.body ?? {};
+  const { originalText, correctionInstruction, formData } = req.body ?? {};
 
   if (!originalText || !correctionInstruction) {
     res.status(400).json({ error: 'Missing required fields: originalText, correctionInstruction' });
     return;
   }
 
-  const sysPrompt = `आप एक हिंदी सरकारी आवेदन पत्र संपादक हैं। आपको एक मूल आवेदन पत्र और एक सुधार निर्देश दिया जाएगा। आपका कार्य:
-1. दिए गए सुधार निर्देश के अनुसार आवेदन पत्र को संशोधित करें
-2. केवल वही बदलें जो निर्देश में कहा गया है — बाकी सब वैसा ही रखें
-3. मूल संरचना, स्वर और शैली को बनाए रखें
-4. केवल संशोधित पाठ लौटाएं, कोई स्पष्टीकरण नहीं
-5. कोई मार्कडाउन फॉर्मेटिंग न करें`;
+  const factBlock = formData ? buildFactBlock(formData) : '';
 
-  const userMsg = `मूल आवेदन पत्र:
+  const sysPrompt = '\u0906\u092A \u0939\u093F\u0902\u0926\u0940 \u0938\u0930\u0915\u093E\u0930\u0940 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930 \u0938\u0902\u092A\u093E\u0926\u0915 \u0939\u0948\u0902\u0964 \u092E\u0942\u0932 \u0906\u0935\u0947\u0926\u0928 \u092E\u0947\u0902 \u0926\u093F\u090F \u0917\u090F \u0938\u092D\u0940 \u0928\u093E\u092E, \u092A\u0924\u0947, \u0924\u093E\u0930\u0940\u0916\u0947\u0902, \u0930\u093E\u0936\u093F\u092F\u093E\u0901 \u0914\u0930 \u0924\u0925\u094D\u092F\u094B\u0902 \u0915\u094B \u091C\u094D\u092F\u094B\u0902 \u0915\u093E \u0924\u094D\u092F\u094B\u0902 \u0930\u0916\u0947\u0902\u0964 \u0915\u0947\u0935\u0932 \u0938\u0941\u0927\u093E\u0930 \u0928\u093F\u0930\u094D\u0926\u0947\u0936 \u092E\u0947\u0902 \u0915\u0939\u0940 \u0917\u0908 \u092C\u093E\u0924\u0947\u0902 \u092C\u0926\u0932\u0947\u0902\u0964 \u092C\u093E\u0915\u0940 \u0938\u092C \u091C\u094D\u092F\u094B\u0902 \u0915\u093E \u0924\u094D\u092F\u094B\u0902 \u0930\u0916\u0947\u0902\u0964 \u0915\u0947\u0935\u0932 \u0938\u0902\u0936\u094B\u0927\u093F\u0924 \u092A\u093E\u0920 \u0932\u094C\u091F\u093E\u090F\u0902, \u0915\u094B\u0908 \u0938\u094D\u092A\u0937\u094D\u091F\u0940\u0915\u0930\u0923 \u0928\u0939\u0940\u0902\u0964 \u092E\u093E\u0930\u094D\u0915\u0921\u093E\u0909\u0928 \u0928\u0939\u0940\u0902\u0964';
+
+  const userMsg = `\u092E\u0942\u0932 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930:
 --- START ---
 ${originalText}
 --- END ---
 
-सुधार निर्देश:
+\u0938\u0941\u0927\u093E\u0930 \u0928\u093F\u0930\u094D\u0926\u0947\u0936:
 ${correctionInstruction}
+${factBlock ? '\n\u0905\u092A\u0930\u093F\u0935\u0930\u094D\u0924\u0928\u0940\u092F \u0924\u0925\u094D\u092F \u2014 \u0907\u0928\u094D\u0939\u0947\u0902 \u0928 \u092C\u0926\u0932\u0947\u0902:\n' + factBlock : ''}
 
-${applicationName ? `आवेदन प्रकार: ${applicationName}` : ''}
-${officeType ? `कार्यालय प्रकार: ${officeType}` : ''}
-
-केवल संशोधित आवेदन पत्र लौटाएं:`;
+\u0915\u0947\u0935\u0932 \u0938\u0902\u0936\u094B\u0927\u093F\u0924 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930 \u0932\u094C\u091F\u093E\u090F\u0902:`;
 
   try {
     const text = await callAi(sysPrompt, userMsg, Math.max(Math.min(originalText.length * 2, 8000), 4000));
@@ -188,45 +198,23 @@ aiRouter.post('/review-application', async (req: Request, res: Response) => {
     return;
   }
 
-  const sysPrompt = `आप एक वरिष्ठ सरकारी अधिकारी हैं जो आवेदन पत्रों की समीक्षा करते हैं। आपको एक हिंदी आवेदन पत्र दिया जाएगा। JSON प्रारूप में विस्तृत समीक्षा प्रदान करें।
+  const sysPrompt = '\u0906\u092A \u090F\u0915 \u0935\u0930\u093F\u0937\u094D\u0920 \u0938\u0930\u0915\u093E\u0930\u0940 \u0905\u0927\u093F\u0915\u093E\u0930\u0940 \u0939\u0948\u0902 \u091C\u094B \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930\u094B\u0902 \u0915\u0940 \u0938\u092E\u0940\u0915\u094D\u0937\u093E \u0915\u0930\u0924\u0947 \u0939\u0948\u0902\u0964 \u0906\u092A\u0915\u094B \u090F\u0915 \u0939\u093F\u0902\u0926\u0940 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930 \u0926\u093F\u092F\u093E \u091C\u093E\u090F\u0917\u093E\u0964 JSON \u092A\u094D\u0930\u093E\u0930\u0942\u092A \u092E\u0947\u0902 \u0935\u093F\u0938\u094D\u0924\u0943\u0924 \u0938\u092E\u0940\u0915\u094D\u0937\u093E \u092A\u094D\u0930\u0926\u093E\u0928 \u0915\u0930\u0947\u0902\u0964\n\n' +
+    '\u0928\u093F\u092E\u094D\u0928\u0932\u093F\u0916\u093F\u0924 JSON \u0938\u094D\u0915\u0940\u092E\u093E \u0915\u093E \u092A\u093E\u0932\u0928 \u0915\u0930\u0947\u0902 (\u0915\u0947\u0935\u0932 JSON \u0932\u094C\u091F\u093E\u090F\u0902, \u0915\u094B\u0908 \u0905\u0928\u094D\u092F \u092A\u093E\u0920 \u0928\u0939\u0940\u0902):\n' +
+    '{\n  "overallScore": <0-100>,\n  "acceptanceProbability": "<High/Medium/Low>",\n  "scores": {\n    "completeness": <0-100>,\n    "clarity": <0-100>,\n    "formality": <0-100>,\n    "legalSoundness": <0-100>,\n    "structure": <0-100>\n  },\n  "missingInformation": [\n    {"label": "<field name>", "description": "<what is missing>", "priority": "<high/medium/low>"}\n  ],\n  "risks": [\n    {"risk": "<risk name>", "description": "<why it is risky>", "severity": "<high/medium/low>"}\n  ],\n  "suggestions": [\n    {"title": "<suggestion>", "description": "<details>", "autoFixPrompt": "<exact instruction to fix>"}\n  ],\n  "summary": "<2-3 line Hindi summary>"\n}';
 
-निम्नलिखित JSON स्कीमा का पालन करें (केवल JSON लौटाएं, कोई अन्य पाठ नहीं):
-{
-  "overallScore": <0-100>,
-  "acceptanceProbability": "<High/Medium/Low>",
-  "scores": {
-    "completeness": <0-100>,
-    "clarity": <0-100>,
-    "formality": <0-100>,
-    "legalSoundness": <0-100>,
-    "structure": <0-100>
-  },
-  "missingInformation": [
-    {"label": "<field name>", "description": "<what is missing>", "priority": "<high/medium/low>"}
-  ],
-  "risks": [
-    {"risk": "<risk name>", "description": "<why it's risky>", "severity": "<high/medium/low>"}
-  ],
-  "suggestions": [
-    {"title": "<suggestion>", "description": "<details>", "autoFixPrompt": "<exact instruction to fix>"}
-  ],
-  "summary": "<2-3 line Hindi summary>"
-}`;
+  const userMsg = `\u0906\u0935\u0947\u0926\u0928 \u092A\u094D\u0930\u0915\u093E\u0930: ${applicationName}
+\u0915\u093E\u0930\u094D\u092F\u093E\u0932\u092F: ${officeType || 'N/A'}
+${formData ? '\u092B\u0949\u0930\u094D\u092E \u0921\u0947\u091F\u093E: ' + JSON.stringify(formData) : ''}
 
-  const userMsg = `आवेदन प्रकार: ${applicationName}
-कार्यालय: ${officeType || 'N/A'}
-${formData ? 'फॉर्म डेटा: ' + JSON.stringify(formData) : ''}
-
-आवेदन पत्र:
+\u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930:
 --- START ---
 ${generatedText}
 --- END ---
 
-केवल JSON लौटाएं:`;
+\u0915\u0947\u0935\u0932 JSON \u0932\u094C\u091F\u093E\u090F\u0902:`;
 
   try {
     const text = await callAi(sysPrompt, userMsg, 8000);
-    // Parse JSON from AI response
     let review: any;
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -255,42 +243,22 @@ aiRouter.post('/government-workflow', async (req: Request, res: Response) => {
   }
 
   const officeLabels: Record<string, string> = {
-    thana: 'थाना', block: 'तहसील/ब्लॉक', bdo: 'खंड विकास कार्यालय',
-    co: 'सर्किल कार्यालय', sdo: 'अनुविभागीय कार्यालय', sp: 'पुलिस अधीक्षक कार्यालय',
-    dc: 'जिला समाहरणालय', court: 'न्यायालय', bank: 'बैंक',
+    thana: '\u0925\u093E\u0928\u093E', block: '\u0924\u0939\u0938\u0940\u0932/\u092C\u094D\u0932\u0949\u0915', bdo: '\u0916\u0902\u0921 \u0935\u093F\u0915\u093E\u0938 \u0915\u093E\u0930\u094D\u092F\u093E\u0932\u092F',
+    co: '\u0938\u0930\u094D\u0915\u093F\u0932 \u0915\u093E\u0930\u094D\u092F\u093E\u0932\u092F', sdo: '\u0905\u0928\u0941\u0935\u093F\u092D\u093E\u0917\u0940\u092F \u0915\u093E\u0930\u094D\u092F\u093E\u0932\u092F', sp: '\u092A\u0941\u0932\u093F\u0938 \u0905\u0927\u0940\u0915\u094D\u0937\u0915 \u0915\u093E\u0930\u094D\u092F\u093E\u0932\u092F',
+    dc: '\u091C\u093F\u0932\u093E \u0938\u092E\u093E\u0939\u0930\u0923\u093E\u0932\u092F', court: '\u0928\u094D\u092F\u093E\u092F\u093E\u0932\u092F', bank: '\u092C\u0948\u0902\u0915',
   };
   const officeName = officeLabels[officeType] || officeType;
 
-  const sysPrompt = `आप भारतीय सरकारी कार्यालय प्रक्रियाओं के विशेषज्ञ हैं। JSON प्रारूप में सरकारी प्रक्रिया की जानकारी दें।
+  const sysPrompt = '\u0906\u092A \u092D\u093E\u0930\u0924\u0940\u092F \u0938\u0930\u0915\u093E\u0930\u0940 \u0915\u093E\u0930\u094D\u092F\u093E\u0932\u092F \u092A\u094D\u0930\u0915\u094D\u0930\u093F\u092F\u093E\u0913\u0902 \u0915\u0947 \u0935\u093F\u0936\u0947\u0937\u091C\u094D\u091E \u0939\u0948\u0902\u0964 JSON \u092A\u094D\u0930\u093E\u0930\u0942\u092A \u092E\u0947\u0902 \u0938\u0930\u0915\u093E\u0930\u0940 \u092A\u094D\u0930\u0915\u094D\u0930\u093F\u092F\u093E \u0915\u0940 \u091C\u093E\u0928\u0915\u093E\u0930\u0940 \u0926\u0947\u0902\u0964\n\n' +
+    'JSON \u0938\u094D\u0915\u0940\u092E\u093E:\n' +
+    '{\n  "submissionOffice": "<office name in Hindi>",\n  "officerDesignation": "<officer designation>",\n  "officeTiming": "<office hours>",\n  "lunchTime": "<lunch break>",\n  "thingsToCarry": ["<item 1>", "<item 2>", ...],\n  "processTimeline": [\n    {"step": 1, "title": "<step name>", "description": "<details>", "estimatedTime": "<duration>"}\n  ],\n  "requiredDocuments": [\n    {"name": "<document>", "copies": "<number>", "reason": "<why needed>"}\n  ],\n  "estimatedTime": {"best": "<duration>", "average": "<duration>", "worst": "<duration>"},\n  "commonMistakes": ["<mistake>", ...],\n  "warnings": [{"message": "<warning>"}],\n  "appealProcess": {"office": "<appeal office>", "whenToUse": "<condition>"},\n  "faqs": [{"question": "<Q>", "answer": "<A>"}],\n  "disclaimer": "<Hindi disclaimer>"\n}\n\n' +
+    '\u0915\u0947\u0935\u0932 JSON \u0932\u094C\u091F\u093E\u090F\u0902\u0964';
 
-JSON स्कीमा:
-{
-  "submissionOffice": "<office name in Hindi>",
-  "officerDesignation": "<officer designation>",
-  "officeTiming": "<office hours>",
-  "lunchTime": "<lunch break>",
-  "thingsToCarry": ["<item 1>", "<item 2>", ...],
-  "processTimeline": [
-    {"step": 1, "title": "<step name>", "description": "<details>", "estimatedTime": "<duration>"}
-  ],
-  "requiredDocuments": [
-    {"name": "<document>", "copies": "<number>", "reason": "<why needed>"}
-  ],
-  "estimatedTime": {"best": "<duration>", "average": "<duration>", "worst": "<duration>"},
-  "commonMistakes": ["<mistake>", ...],
-  "warnings": [{"message": "<warning>"}],
-  "appealProcess": {"office": "<appeal office>", "whenToUse": "<condition>"},
-  "faqs": [{"question": "<Q>", "answer": "<A>"}],
-  "disclaimer": "<Hindi disclaimer>"
-}
+  const userMsg = `\u0906\u0935\u0947\u0926\u0928 \u092A\u094D\u0930\u0915\u093E\u0930: ${applicationName}
+\u0915\u093E\u0930\u094D\u092F\u093E\u0932\u092F: ${officeName} (${officeType})
+${formData ? '\u0915\u094D\u0937\u0947\u0924\u094D\u0930: ' + [formData.state, formData.district, formData.police_station].filter(Boolean).join(', ') : ''}
 
-केवल JSON लौटाएं।`;
-
-  const userMsg = `आवेदन प्रकार: ${applicationName}
-कार्यालय: ${officeName} (${officeType})
-${formData ? 'क्षेत्र: ' + [formData.state, formData.district, formData.police_station].filter(Boolean).join(', ') : ''}
-
-केवल JSON लौटाएं:`;
+\u0915\u0947\u0935\u0932 JSON \u0932\u094C\u091F\u093E\u090F\u0902:`;
 
   try {
     const text = await callAi(sysPrompt, userMsg, 8000);
@@ -319,41 +287,20 @@ aiRouter.post('/process-guidance', async (req: Request, res: Response) => {
     return;
   }
 
-  const sysPrompt = `आप भारतीय सरकारी प्रक्रिया मार्गदर्शक हैं। JSON प्रारूप में मार्गदर्शन दें।
-
-JSON स्कीमा:
-{
-  "caseCategory": "<category in Hindi>",
-  "confidence": <0-1>,
-  "primaryOffice": "<office name>",
-  "recipientDesignation": "<designation>",
-  "submissionMethods": ["<method 1>", ...],
-  "requiredDocuments": [
-    {"name": "<doc>", "required": true/false, "reason": "<why>"}
-  ],
-  "submissionSteps": ["<step>", ...],
-  "expectedProcess": ["<stage>", ...],
-  "followUpAdvice": ["<advice>", ...],
-  "escalationPath": [
-    {"order": 1, "office": "<office>", "whenToUse": "<condition>"}
-  ],
-  "processTimeline": [
-    {"order": 1, "title": "<stage>", "description": "<details>", "optional": false}
-  ],
-  "urgentSafety": {"isUrgent": false, "message": "", "actions": []},
-  "disclaimer": "<disclaimer>"
-}
-केवल JSON लौटाएं।`;
+  const sysPrompt = '\u0906\u092A \u092D\u093E\u0930\u0924\u0940\u092F \u0938\u0930\u0915\u093E\u0930\u0940 \u092A\u094D\u0930\u0915\u094D\u0930\u093F\u092F\u093E \u092E\u093E\u0930\u094D\u0917\u0926\u0930\u094D\u0936\u0915 \u0939\u0948\u0902\u0964 JSON \u092A\u094D\u0930\u093E\u0930\u0942\u092A \u092E\u0947\u0902 \u092E\u093E\u0930\u094D\u0917\u0926\u0930\u094D\u0936\u0928 \u0926\u0947\u0902\u0964\n\n' +
+    'JSON \u0938\u094D\u0915\u0940\u092E\u093E:\n' +
+    '{\n  "caseCategory": "<category in Hindi>",\n  "confidence": <0-1>,\n  "primaryOffice": "<office name>",\n  "recipientDesignation": "<designation>",\n  "submissionMethods": ["<method 1>", ...],\n  "requiredDocuments": [\n    {"name": "<doc>", "required": true/false, "reason": "<why>"}\n  ],\n  "submissionSteps": ["<step>", ...],\n  "expectedProcess": ["<stage>", ...],\n  "followUpAdvice": ["<advice>", ...],\n  "escalationPath": [\n    {"order": 1, "office": "<office>", "whenToUse": "<condition>"}\n  ],\n  "processTimeline": [\n    {"order": 1, "title": "<stage>", "description": "<details>", "optional": false}\n  ],\n  "urgentSafety": {"isUrgent": false, "message": "", "actions": []},\n  "disclaimer": "<disclaimer>"\n}\n' +
+    '\u0915\u0947\u0935\u0932 JSON \u0932\u094C\u091F\u093E\u090F\u0902\u0964';
 
   const locInfo = userLocation
-    ? `स्थान: ${[userLocation.state, userLocation.district, userLocation.policeStation, userLocation.block].filter(Boolean).join(', ')}`
+    ? `\u0938\u094D\u0925\u093E\u0928: ${[userLocation.state, userLocation.district, userLocation.policeStation, userLocation.block].filter(Boolean).join(', ')}`
     : '';
 
-  const userMsg = `आवेदन: ${applicationName} | कार्यालय: ${officeType}
+  const userMsg = `\u0906\u0935\u0947\u0926\u0928: ${applicationName} | \u0915\u093E\u0930\u094D\u092F\u093E\u0932\u092F: ${officeType}
 ${locInfo}
-${formData ? 'फॉर्म फील्ड: ' + Object.keys(formData).join(', ') : ''}
+${formData ? '\u092B\u0949\u0930\u094D\u092E \u092B\u0940\u0932\u094D\u0921: ' + Object.keys(formData).join(', ') : ''}
 
-केवल JSON लौटाएं:`;
+\u0915\u0947\u0935\u0932 JSON \u0932\u094C\u091F\u093E\u090F\u0902:`;
 
   try {
     const text = await callAi(sysPrompt, userMsg, 8000);
@@ -382,40 +329,19 @@ aiRouter.post('/decision-engine', async (req: Request, res: Response) => {
     return;
   }
 
-  const sysPrompt = `आप एक AI निर्णय इंजन हैं। आवेदन पत्र का विश्लेषण कर JSON में निर्णय दें।
+  const sysPrompt = '\u0906\u092A \u090F\u0915 AI \u0928\u093F\u0930\u094D\u0923\u092F \u0907\u0902\u091C\u0928 \u0939\u0948\u0902\u0964 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930 \u0915\u093E \u0935\u093F\u0936\u094D\u0932\u0947\u0937\u0923 \u0915\u0930 JSON \u092E\u0947\u0902 \u0928\u093F\u0930\u094D\u0923\u092F \u0926\u0947\u0902\u0964\n\n' +
+    'JSON \u0938\u094D\u0915\u0940\u092E\u093E:\n' +
+    '{\n  "readiness": "<READY/NEEDS_IMPROVEMENT/NOT_RECOMMENDED>",\n  "readinessScore": <0-100>,\n  "summary": "<Hindi summary>",\n  "riskMatrix": [\n    {"category": "<category>", "level": "<High/Medium/Low>", "description": "<details>"}\n  ],\n  "issues": [\n    {"description": "<issue>", "fix": "<how to fix>", "priority": "<Critical/High/Medium/Low>"}\n  ],\n  "successPrediction": {\n    "level": "<High/Medium/Low>",\n    "confidence": <0-1>,\n    "explanation": "<Hindi explanation>"\n  },\n  "checklist": {\n    "beforeSubmission": ["<item>", ...],\n    "atSubmission": ["<item>", ...],\n    "afterSubmission": ["<item>", ...]\n  }\n}\n' +
+    '\u0915\u0947\u0935\u0932 JSON \u0932\u094C\u091F\u093E\u090F\u0902\u0964';
 
-JSON स्कीमा:
-{
-  "readiness": "<READY/NEEDS_IMPROVEMENT/NOT_RECOMMENDED>",
-  "readinessScore": <0-100>,
-  "summary": "<Hindi summary>",
-  "riskMatrix": [
-    {"category": "<category>", "level": "<High/Medium/Low>", "description": "<details>"}
-  ],
-  "issues": [
-    {"description": "<issue>", "fix": "<how to fix>", "priority": "<Critical/High/Medium/Low>"}
-  ],
-  "successPrediction": {
-    "level": "<High/Medium/Low>",
-    "confidence": <0-1>,
-    "explanation": "<Hindi explanation>"
-  },
-  "checklist": {
-    "beforeSubmission": ["<item>", ...],
-    "atSubmission": ["<item>", ...],
-    "afterSubmission": ["<item>", ...]
-  }
-}
-केवल JSON लौटाएं।`;
+  const userMsg = `\u0906\u0935\u0947\u0926\u0928: ${applicationName} | \u0915\u093E\u0930\u094D\u092F\u093E\u0932\u092F: ${officeType || 'N/A'}
 
-  const userMsg = `आवेदन: ${applicationName} | कार्यालय: ${officeType || 'N/A'}
-
-आवेदन पत्र:
+\u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930:
 --- START ---
 ${generatedText.substring(0, 3000)}
 --- END ---
 
-केवल JSON लौटाएं:`;
+\u0915\u0947\u0935\u0932 JSON \u0932\u094C\u091F\u093E\u090F\u0902:`;
 
   try {
     const text = await callAi(sysPrompt, userMsg, 8000);
