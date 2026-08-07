@@ -62,9 +62,15 @@ const REQUIRED_SECTIONS = [
 export function validateOutput(text: string): string | null {
   if (!text || text.trim().length < 50) return 'Output too short or empty.';
 
-  // Check for unresolved placeholders
+  // ── Placeholder check: warn but don't reject ──────────────────────
+  // The system prompt instructs the AI to fill {{placeholders}} from
+  // form data. If the AI leaves some, they'll be caught by the fact
+  // validator and repaired in validateAndRepair. Rejecting here would
+  // prevent the repair pass from running.
   const unresolved = text.match(/\{\{[a-zA-Z_]+\}\}/g);
-  if (unresolved) return `Unresolved placeholders: ${unresolved.join(', ')}`;
+  if (unresolved) {
+    log.warn(`[AIValidator] ⚠️ ${unresolved.length} unresolved placeholder(s) — will attempt repair: ${unresolved.slice(0, 6).join(', ')}`);
+  }
 
   // Check for markdown artifacts
   if (/[*_]{3,}/.test(text)) return 'Markdown artifacts found in output.';

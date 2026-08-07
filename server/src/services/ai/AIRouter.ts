@@ -290,11 +290,52 @@ function assessDraft(result: AIResponse, formData: Record<string, string>): Draf
 
 // ── validateAndRepair ────────────────────────────────────────────────────
 
+/** Quick post-interpolation: replace {{placeholders}} with formData values. */
+function postInterpolate(text: string, formData: Record<string, string>): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
+    // Direct formData match
+    if (formData[key]?.trim()) return formData[key].trim();
+    // Common aliases
+    const aliases: Record<string, string[]> = {
+      name: ['applicant_name', 'deponent_name', 'petitioner_name'],
+      parent_name: ['parent_spouse_name', 'father_name'],
+      village: ['village'],
+      district: ['district'],
+      state: ['state'],
+      police_station: ['thana', 'police_station_name'],
+      police_station_or_block: ['thana', 'police_station_name'],
+      applicant_name: ['applicant_name'],
+      applicant_phone: ['applicant_phone', 'mobile', 'phone'],
+    };
+    const aliasesForKey = aliases[key] ?? [key];
+    for (const alias of aliasesForKey) {
+      if (formData[alias]?.trim()) return formData[alias].trim();
+    }
+    // Auto-generated: date
+    if (key === 'date') {
+      const now = new Date();
+      const hindiMonths = ['जनवरी','फरवरी','मार्च','अप्रैल','मई','जून','जुलाई','अगस्त','सितंबर','अक्टूबर','नवंबर','दिसंबर'];
+      return `${now.getDate().toString().padStart(2,'0')} ${hindiMonths[now.getMonth()]} ${now.getFullYear()}`;
+    }
+    // Auto-generated: place
+    if (key === 'place') {
+      const v = formData['village']?.trim();
+      const d = formData['district']?.trim();
+      if (v && d) return `${v}, ${d}`;
+      return d || v || '............';
+    }
+    return '............'; // unfilled
+  });
+}
+
 async function validateAndRepair(
   initialResult: AIResponse,
   formData: Record<string, string>,
   _systemPrompt: string,
 ): Promise<AIResponse> {
+  // ── Step 0: Post-interpolate placeholders ──────────────────────────
+  initialResult.generatedText = postInterpolate(initialResult.generatedText, formData);
+
   const requestStart = (initialResult as any)._requestStartMs ?? Date.now();
   const elapsed = Date.now() - requestStart;
   const assessment = assessDraft(initialResult, formData);
