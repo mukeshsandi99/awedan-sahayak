@@ -85,7 +85,7 @@ ${Object.entries(formData).map(([k, v]) => `${k}: ${v}`).join('\n')}
 कृपया एक संपूर्ण औपचारिक हिंदी आवेदन पत्र तैयार करें।`;
 
   try {
-    const text = await callAi(sysPrompt, userMsg, 4000);
+    const text = await callAi(sysPrompt, userMsg, 8000);
     const { getActiveConfig } = await import('../services/aiService');
     const config = getActiveConfig();
     res.json({
@@ -193,7 +193,7 @@ ${generatedText}
 केवल JSON लौटाएं:`;
 
   try {
-    const text = await callAi(sysPrompt, userMsg, 4000);
+    const text = await callAi(sysPrompt, userMsg, 8000);
     // Parse JSON from AI response
     let review: any;
     try {
@@ -261,7 +261,7 @@ ${formData ? 'क्षेत्र: ' + [formData.state, formData.district, for
 केवल JSON लौटाएं:`;
 
   try {
-    const text = await callAi(sysPrompt, userMsg, 4000);
+    const text = await callAi(sysPrompt, userMsg, 8000);
     let workflow: any;
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -324,7 +324,7 @@ ${formData ? 'फॉर्म फील्ड: ' + Object.keys(formData).join(',
 केवल JSON लौटाएं:`;
 
   try {
-    const text = await callAi(sysPrompt, userMsg, 4000);
+    const text = await callAi(sysPrompt, userMsg, 8000);
     let guidance: any;
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -386,7 +386,7 @@ ${generatedText.substring(0, 3000)}
 केवल JSON लौटाएं:`;
 
   try {
-    const text = await callAi(sysPrompt, userMsg, 4000);
+    const text = await callAi(sysPrompt, userMsg, 8000);
     let decision: any;
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
