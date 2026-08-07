@@ -71,14 +71,14 @@ function getFallbackProvider(): IAIProvider | null {
 function getMaxTokensForApp(applicationName: string, officeType: string): number {
   const app = applicationName.toLowerCase();
   // Police / detailed complaints need more tokens
-  if (/मारपीट|शिकायत|FIR|विवाद|अपराध|धमकी|चोरी|लूट/i.test(app)) return 3000;
+  if (/मारपीट|शिकायत|FIR|विवाद|अपराध|धमकी|चोरी|लूट/i.test(app)) return 6000;
   // Land / registry / property need medium
-  if (/जमीन|नामांतरण|रजिस्ट्री|खतियान|दाखिल|मापी|कब्जा|राजस्व/i.test(app)) return 3000;
+  if (/जमीन|नामांतरण|रजिस्ट्री|खतियान|दाखिल|मापी|कब्जा|राजस्व/i.test(app)) return 5000;
   // Certificates / simple requests
-  if (/प्रमाण|पत्र|आय|जाति|निवास|जन्म|मृत्यु/i.test(app)) return 2500;
+  if (/प्रमाण|पत्र|आय|जाति|निवास|जन्म|मृत्यु/i.test(app)) return 4000;
   // Bank / school
-  if (officeType === 'bank') return 2500;
-  if (officeType === 'school' || officeType === 'college') return 2500;
+  if (officeType === 'bank') return 4000;
+  if (officeType === 'school' || officeType === 'college') return 4000;
   return 1200; // default
 }
 
@@ -213,7 +213,7 @@ export const AIRouter = {
     profile.push({ stage: 'input_validation', durationMs: Date.now() - t1 });
 
     t1 = Date.now();
-    const result = await dispatchWithRetry({ systemPrompt, userMessage, maxTokens: 3000 }, profile);
+    const result = await dispatchWithRetry({ systemPrompt, userMessage, maxTokens: 5000 }, profile);
     profile.push({ stage: 'ai_call_total', durationMs: Date.now() - t1 });
 
     t1 = Date.now();

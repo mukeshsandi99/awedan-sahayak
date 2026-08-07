@@ -31,24 +31,24 @@ export class DeepSeekProvider implements IAIProvider {
     });
 
     try {
-      // ── DeepSeek: disable extended thinking ───────────────────────
-      // DeepSeek v4-flash defaults to extended thinking ON, which consumes
-      // the entire max_tokens budget on thinking blocks, leaving zero
-      // tokens for the actual text output. We disable thinking entirely —
-      // the buildSystemPrompt() already provides detailed instructions.
+      // Use generous max_tokens — DeepSeek v4-flash uses extended
+      // thinking which consumes tokens alongside text output. 8000
+      // tokens ensures room for both thinking and complete Hindi text.
       const response = await client.messages.create({
         model: this.model,
-        max_tokens: request.maxTokens ?? 4000,
+        max_tokens: request.maxTokens ?? 8000,
         system: request.systemPrompt,
         messages: [{ role: 'user', content: request.userMessage }],
         temperature: request.temperature,
-        thinking: { type: 'disabled' },
       });
 
       const text = extractText(response.content);
+      const blockTypes = Array.isArray(response.content)
+        ? (response.content as any[]).map((b: any) => b.type).join(',')
+        : typeof response.content;
       const cleanText = text.replace(/\*\*/g, '').replace(/__/g, '');
 
-      log.info(`[DeepSeek] OK in=${response.usage?.input_tokens ?? 0} out=${response.usage?.output_tokens ?? 0} time=${Date.now() - start}ms`);
+      log.info(`[DeepSeek] OK in=${response.usage?.input_tokens ?? 0} out=${response.usage?.output_tokens ?? 0} text=${cleanText.length}chars blocks=[${blockTypes}] time=${Date.now() - start}ms`);
 
       return {
         generatedText: cleanText,

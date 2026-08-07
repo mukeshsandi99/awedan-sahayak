@@ -572,24 +572,12 @@ export async function draftApplication(
   });
 
   try {
-    // ── DeepSeek: disable extended thinking ───────────────────────
-    // DeepSeek v4-flash defaults to extended thinking ON, which consumes
-    // the entire max_tokens=4000 budget on thinking blocks, leaving zero
-    // tokens for the actual text output. Non-streaming returns empty text
-    // when all blocks are type=thinking. We disable thinking entirely —
-    // the buildSystemPrompt() already provides detailed instructions.
-    const isDeepSeek = config.provider === 'deepseek';
-    const extraParams: Record<string, any> = {
+    const response = await client.messages.create({
       model: config.model,
-      max_tokens: 1800,
+      max_tokens: 8000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
-    };
-    if (isDeepSeek) {
-      extraParams.thinking = { type: 'disabled' };
-    }
-
-    const response = await client.messages.create(extraParams);
+    });
 
     let text: string;
     if (typeof response.content === 'string') {
@@ -713,19 +701,12 @@ export async function draftCustomApplication(
   });
 
   try {
-    // ── DeepSeek: disable extended thinking ───────────────────────
-    const isDeepSeek = config.provider === 'deepseek';
-    const extraParams: Record<string, any> = {
+    const response = await client.messages.create({
       model: config.model,
-      max_tokens: 1800,
+      max_tokens: 8000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
-    };
-    if (isDeepSeek) {
-      extraParams.thinking = { type: 'disabled' };
-    }
-
-    const response = await client.messages.create(extraParams);
+    });
 
     let text: string;
     if (typeof response.content === 'string') {
