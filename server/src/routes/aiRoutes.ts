@@ -9,6 +9,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { buildProtectedBlock, findLostFacts, REPAIR_INSTRUCTION, isIdentityCritical } from '../services/factGuard';
 
 export const aiRouter = Router();
 
@@ -155,7 +156,7 @@ aiRouter.post('/revise-application', async (req: Request, res: Response) => {
   }
 
   const protectedFormData = originalFormData ?? formData ?? {};
-  const factBlock = buildFactBlock(protectedFormData);
+  const factBlock = buildProtectedBlock(protectedFormData);
 
   const sysPrompt = '\u0906\u092A \u0939\u093F\u0902\u0926\u0940 \u0938\u0930\u0915\u093E\u0930\u0940 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930 \u0938\u0902\u092A\u093E\u0926\u0915 \u0939\u0948\u0902\u0964 \u092E\u0942\u0932 \u0906\u0935\u0947\u0926\u0928 \u092E\u0947\u0902 \u0926\u093F\u090F \u0917\u090F \u0938\u092D\u0940 \u0928\u093E\u092E, \u092A\u0924\u0947, \u0924\u093E\u0930\u0940\u0916\u0947\u0902, \u0930\u093E\u0936\u093F\u092F\u093E\u0901 \u0914\u0930 \u0924\u0925\u094D\u092F\u094B\u0902 \u0915\u094B \u091C\u094D\u092F\u094B\u0902 \u0915\u093E \u0924\u094D\u092F\u094B\u0902 \u0930\u0916\u0947\u0902\u0964 \u0915\u0947\u0935\u0932 \u0938\u0941\u0927\u093E\u0930 \u0928\u093F\u0930\u094D\u0926\u0947\u0936 \u092E\u0947\u0902 \u0915\u0939\u0940 \u0917\u0908 \u092C\u093E\u0924\u0947\u0902 \u092C\u0926\u0932\u0947\u0902\u0964 \u092C\u093E\u0915\u0940 \u0938\u092C \u091C\u094D\u092F\u094B\u0902 \u0915\u093E \u0924\u094D\u092F\u094B\u0902 \u0930\u0916\u0947\u0902\u0964 \u0915\u0947\u0935\u0932 \u0938\u0902\u0936\u094B\u0927\u093F\u0924 \u092A\u093E\u0920 \u0932\u094C\u091F\u093E\u090F\u0902, \u0915\u094B\u0908 \u0938\u094D\u092A\u0937\u094D\u091F\u0940\u0915\u0930\u0923 \u0928\u0939\u0940\u0902\u0964 \u092E\u093E\u0930\u094D\u0915\u0921\u093E\u0909\u0928 \u0928\u0939\u0940\u0902\u0964';
 
@@ -171,7 +172,24 @@ ${factBlock ? '\n\u0905\u092A\u0930\u093F\u0935\u0930\u094D\u0924\u0928\u0940\u0
 \u0915\u0947\u0935\u0932 \u0938\u0902\u0936\u094B\u0927\u093F\u0924 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930 \u0932\u094C\u091F\u093E\u090F\u0902:`;
 
   try {
-    const text = await callAi(sysPrompt, userMsg, Math.max(Math.min(originalText.length * 2, 8000), 4000));
+    let text = await callAi(sysPrompt, userMsg, Math.max(Math.min(originalText.length * 2, 8000), 4000));
+    // Validate protected facts survived revision
+    let finalText = text;
+    const lostFacts = findLostFacts(originalText, finalText, protectedFormData, correctionInstruction);
+    if (lostFacts.length > 0) {
+      console.log('[revise] ' + lostFacts.length + ' protected fact(s) lost: ' + lostFacts.slice(0, 5).join(', '));
+      if (isIdentityCritical(lostFacts)) {
+        const repairMsg = REPAIR_INSTRUCTION + '\n\n' + userMsg;
+        try {
+          const repaired = await callAi(sysPrompt, repairMsg, Math.max(Math.min(originalText.length * 2, 8000), 4000));
+          const stillLost = findLostFacts(originalText, repaired, protectedFormData, correctionInstruction);
+          if (stillLost.length < lostFacts.length) {
+            finalText = repaired;
+            console.log('[revise] Repair recovered ' + (lostFacts.length - stillLost.length) + ' facts');
+          }
+        } catch (e) { /* repair failed, keep original text */ }
+      }
+    }
     const { getActiveConfig } = await import('../services/aiService');
     const config = getActiveConfig();
     res.json({
