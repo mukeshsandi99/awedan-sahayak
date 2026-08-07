@@ -33,18 +33,24 @@ async function getAiClient() {
 
 async function callAi(systemPrompt: string, userMessage: string, maxTokens: number = 4000): Promise<string> {
   const { client, config } = await getAiClient();
-  const response = await client.messages.create({
+  const params: Record<string, any> = {
     model: config.model,
     max_tokens: maxTokens,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
-  });
-  if (typeof response.content === 'string') return response.content;
+  };
+  // Disable DeepSeek extended thinking to prevent empty text output
+  if (config.provider === 'deepseek') {
+    params.thinking = { type: 'disabled' };
+  }
+  const response = await client.messages.create(params);
+  if (typeof response.content === 'string') return response.content.replace(/\*\*/g, '').replace(/__/g, '');
   if (Array.isArray(response.content)) {
     return response.content
       .filter((block: any) => block.type === 'text')
       .map((block: any) => block.text)
-      .join('\n');
+      .join('\n')
+      .replace(/\*\*/g, '').replace(/__/g, '');
   }
   return '';
 }
