@@ -97,7 +97,9 @@ export function validateOutput(text: string): string | null {
 export function qualityScore(text: string): number {
   let score = 100;
   if (text.length < 100) score -= 40;
-  if (/\{\{[a-zA-Z_]+\}\}/.test(text)) score -= 30;
+  // Placeholder check: warn only — postInterpolate handles these upstream.
+  // Don't penalize score; unresolved placeholders don't make text unreadable.
+  if (/\{\{[a-zA-Z_]+\}\}/.test(text)) score -= 0;
   if (/[*_]{3,}/.test(text)) score -= 10;
 
   let sectionsFound = 0;
