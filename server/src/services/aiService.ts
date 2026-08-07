@@ -3,6 +3,8 @@
  *
  * Supports multiple LLM providers via the AI_PROVIDER environment variable.
  * Both Claude and DeepSeek use the same @anthropic-ai/sdk client since
+ *
+ * SECURITY: Never logs API keys, tokens, or user PII in production.
  * DeepSeek offers an Anthropic-compatible Messages API endpoint.
  *
  * PRIVACY: No Aadhar data is ever sent to the API. Only the sanitized
@@ -13,6 +15,10 @@
  *   ANTHROPIC_API_KEY  — Required when AI_PROVIDER=claude
  *   DEEPSEEK_API_KEY   — Required when AI_PROVIDER=deepseek
  */
+
+import { createLogger } from '../config/logger';
+
+const log = createLogger('AIService');
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -74,7 +80,7 @@ function getProviderConfig(): ProviderConfig {
 
   // Default: Claude
   if (raw !== 'claude') {
-    console.warn(`[AIService] Unknown AI_PROVIDER "${raw}", falling back to "claude".`);
+    log.warn(`[AIService] Unknown AI_PROVIDER "${raw}", falling back to "claude".`);
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -103,11 +109,11 @@ let _config: ProviderConfig | null = null;
 export function getActiveConfig(): ProviderConfig {
   if (!_config) {
     _config = getProviderConfig();
-    console.log('[AIService] Provider initialized:');
-    console.log(`  Provider:  ${_config.provider}`);
-    console.log(`  Model:     ${_config.model}`);
-    console.log(`  Base URL:  ${_config.baseURL ?? '(default Anthropic)'}`);
-    console.log(`  API Key:   ${_config.apiKey ? '***configured***' : 'MISSING'}`);
+    log.info('[AIService] Provider initialized:');
+    log.info(`  Provider:  ${_config.provider}`);
+    log.info(`  Model:     ${_config.model}`);
+    log.info(`  Base URL:  ${_config.baseURL ?? '(default Anthropic)'}`);
+    log.info(`  API Key:   ${_config.apiKey ? '***configured***' : 'MISSING'}`);
   }
   return _config;
 }
@@ -134,6 +140,7 @@ const DESIGNATIONS: Record<string, string> = {
   pwd: 'कार्यपालक अभियंता महोदय',
   rcd: 'कार्यपालक अभियंता महोदय',
   bcd: 'कार्यपालक अभियंता महोदय',
+  transport: 'परिवहन अधिकारी / आरटीओ अधिकारी महोदय',
   custom: 'संबंधित अधिकारी महोदय',
 };
 
@@ -153,6 +160,7 @@ const LOCATION_LABEL: Record<string, string> = {
   pwd: 'मंडल',
   rcd: 'मंडल',
   bcd: 'मंडल',
+  transport: 'जिला परिवहन कार्यालय',
   custom: 'कार्यालय',
 };
 
@@ -501,11 +509,11 @@ export function validateNoPlaceholders(generatedText: string): string[] {
   const matches = generatedText.match(/\{\{(\w+)\}\}/g);
   if (matches && matches.length > 0) {
     const unique = [...new Set(matches)];
-    console.warn(`[AIService] ⚠️ ${unique.length} unresolved placeholder(s) in final output:`);
-    unique.forEach((p) => console.warn(`  - ${p}`));
+    log.warn(`[AIService] ⚠️ ${unique.length} unresolved placeholder(s) in final output:`);
+    unique.forEach((p) => log.warn(`  - ${p}`));
     return unique;
   }
-  console.log('[AIService] ✅ All placeholders resolved.');
+  log.info('[AIService] ✅ All placeholders resolved.');
   return [];
 }
 
@@ -552,12 +560,12 @@ export async function draftApplication(
 
   const userMessage = interpolated + applicantInfoBlock;
 
-  console.log(`[AIService] Drafting with ${config.provider} (${config.model})...`);
-  console.log(`[AIService] System prompt: ${systemPrompt.length} chars`);
-  console.log(`[AIService] Form fields received (${Object.keys(formData).length}):`, Object.keys(formData).join(', '));
-  console.log(`[AIService] Form data values:`, JSON.stringify(formData, null, 2));
-  console.log(`[AIService] User message total: ${userMessage.length} chars`);
-  console.log(`[AIService] User preview:  ${userMessage.substring(0, 300)}...`);
+  log.info(`[AIService] Drafting with ${config.provider} (${config.model})...`);
+  log.info(`[AIService] System prompt: ${systemPrompt.length} chars`);
+  log.info(`[AIService] Form fields received (${Object.keys(formData).length}):`, Object.keys(formData).join(', '));
+  log.info(`[AIService] Form data values:`, JSON.stringify(formData, null, 2));
+  log.info(`[AIService] User message total: ${userMessage.length} chars`);
+  log.info(`[AIService] User preview:  ${userMessage.substring(0, 300)}...`);
 
   // Dynamically import the Anthropic SDK (avoids crash if not installed)
   let Anthropic: any;
@@ -576,12 +584,24 @@ export async function draftApplication(
   });
 
   try {
-    const response = await client.messages.create({
+    // ── DeepSeek: disable extended thinking ───────────────────────
+    // DeepSeek v4-flash defaults to extended thinking ON, which consumes
+    // the entire max_tokens=4000 budget on thinking blocks, leaving zero
+    // tokens for the actual text output. Non-streaming returns empty text
+    // when all blocks are type=thinking. We disable thinking entirely —
+    // the buildSystemPrompt() already provides detailed instructions.
+    const isDeepSeek = config.provider === 'deepseek';
+    const extraParams: Record<string, any> = {
       model: config.model,
       max_tokens: 4000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
-    });
+    };
+    if (isDeepSeek) {
+      extraParams.thinking = { type: 'disabled' };
+    }
+
+    const response = await client.messages.create(extraParams);
 
     let text: string;
     if (typeof response.content === 'string') {
@@ -598,7 +618,7 @@ export async function draftApplication(
     // Safety net: strip any residual markdown bold/italic markers
     text = text.replace(/\*\*/g, '').replace(/__/g, '');
 
-    console.log(`[AIService] AI generated ${text.length} chars.`);
+    log.info(`[AIService] AI generated ${text.length} chars.`);
 
     // ── Post-generation interpolation ────────────────────────────
     // The AI's system prompt contains template placeholders like
@@ -608,23 +628,23 @@ export async function draftApplication(
     text = postResult.text;
 
     if (postResult.unresolved.length > 0) {
-      console.warn(
+      log.warn(
         `[AIService] ⚠️ ${postResult.unresolved.length} placeholder(s) could not be resolved:`,
         postResult.unresolved,
       );
-      console.warn('[AIService] These fields are missing from the form data. Check FIELD_ALIASES if they should map to existing form keys.');
+      log.warn('[AIService] These fields are missing from the form data. Check FIELD_ALIASES if they should map to existing form keys.');
     }
 
     // ── Final validation ─────────────────────────────────────────
     const remaining = validateNoPlaceholders(text);
     if (remaining.length > 0) {
-      console.warn(
+      log.warn(
         '[AIService] ⚠️ Final output still contains unresolved placeholders.',
         'This may indicate missing form fields or a naming mismatch.',
       );
     }
 
-    console.log(`[AIService] Final output: ${text.length} chars.`);
+    log.info(`[AIService] Final output: ${text.length} chars.`);
 
     return {
       generatedText: text,
@@ -638,7 +658,7 @@ export async function draftApplication(
   } catch (err: any) {
     const status = err?.status ?? 'unknown';
     const message = err?.error?.message ?? err?.message ?? String(err);
-    console.error(`[AIService] API error (${status}): ${message}`);
+    log.error(`[AIService] API error (${status}): ${message}`);
     throw new Error(
       `AI provider error (${config.provider}, HTTP ${status}): ${message}`,
     );
@@ -683,10 +703,10 @@ export async function draftCustomApplication(
 
   const userMessage = `कृपया निम्नलिखित जानकारी के आधार पर एक औपचारिक हिंदी आवेदन पत्र तैयार करें:\n\nनोट: "custom_description" फील्ड में उपयोगकर्ता ने अपनी पूरी समस्या/अनुरोध अपने शब्दों में लिखा है। इसी के आधार पर नैरेटिव (भाग 4) और समापन अनुरोध (भाग 5) तैयार करें।${applicantInfoBlock}`;
 
-  console.log(`[AIService] Drafting custom application with ${config.provider} (${config.model})...`);
-  console.log(`[AIService] Office: ${officeName}, Designation: ${recipientDesignation ?? '(not provided)'}`);
-  console.log(`[AIService] Custom system prompt: ${systemPrompt.length} chars`);
-  console.log(`[AIService] User message: ${userMessage.length} chars`);
+  log.info(`[AIService] Drafting custom application with ${config.provider} (${config.model})...`);
+  log.info(`[AIService] Office: ${officeName}, Designation: ${recipientDesignation ?? '(not provided)'}`);
+  log.info(`[AIService] Custom system prompt: ${systemPrompt.length} chars`);
+  log.info(`[AIService] User message: ${userMessage.length} chars`);
 
   // Dynamically import the Anthropic SDK
   let Anthropic: any;
@@ -705,12 +725,19 @@ export async function draftCustomApplication(
   });
 
   try {
-    const response = await client.messages.create({
+    // ── DeepSeek: disable extended thinking ───────────────────────
+    const isDeepSeek = config.provider === 'deepseek';
+    const extraParams: Record<string, any> = {
       model: config.model,
       max_tokens: 4000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
-    });
+    };
+    if (isDeepSeek) {
+      extraParams.thinking = { type: 'disabled' };
+    }
+
+    const response = await client.messages.create(extraParams);
 
     let text: string;
     if (typeof response.content === 'string') {
@@ -727,14 +754,14 @@ export async function draftCustomApplication(
     // Safety net: strip any residual markdown bold/italic markers
     text = text.replace(/\*\*/g, '').replace(/__/g, '');
 
-    console.log(`[AIService] Custom AI generated ${text.length} chars.`);
+    log.info(`[AIService] Custom AI generated ${text.length} chars.`);
 
     // Post-generation interpolation using 'custom' office type
     const postResult = postInterpolate(text, formData, 'custom');
     text = postResult.text;
 
     if (postResult.unresolved.length > 0) {
-      console.warn(
+      log.warn(
         `[AIService] ⚠️ ${postResult.unresolved.length} placeholder(s) unresolved in custom output:`,
         postResult.unresolved,
       );
@@ -742,12 +769,12 @@ export async function draftCustomApplication(
 
     const remaining = validateNoPlaceholders(text);
     if (remaining.length > 0) {
-      console.warn(
+      log.warn(
         '[AIService] ⚠️ Final custom output still contains unresolved placeholders.',
       );
     }
 
-    console.log(`[AIService] Final custom output: ${text.length} chars.`);
+    log.info(`[AIService] Final custom output: ${text.length} chars.`);
 
     return {
       generatedText: text,
@@ -761,7 +788,7 @@ export async function draftCustomApplication(
   } catch (err: any) {
     const status = err?.status ?? 'unknown';
     const message = err?.error?.message ?? err?.message ?? String(err);
-    console.error(`[AIService] Custom API error (${status}): ${message}`);
+    log.error(`[AIService] Custom API error (${status}): ${message}`);
     throw new Error(
       `AI provider error (${config.provider}, HTTP ${status}): ${message}`,
     );
