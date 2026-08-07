@@ -152,17 +152,22 @@ export const AIRouter = {
     const profile: RequestProfile[] = [];
     const t0 = Date.now();
 
-    // Step 1: Build prompts (with cache)
+    // Step 1: Build prompts (with cache for template, then interpolate formData)
     let t1 = Date.now();
     const cacheKey = `gen:${req.officeType}:${req.applicationName}`;
-    let systemPrompt = getCachedPrompt(cacheKey);
-    if (!systemPrompt) {
-      systemPrompt = buildSystemPrompt(req.officeType, req.applicationName);
-      setCachedPrompt(cacheKey, systemPrompt);
+    let systemPromptTemplate = getCachedPrompt(cacheKey);
+    if (!systemPromptTemplate) {
+      systemPromptTemplate = buildSystemPrompt(req.officeType, req.applicationName);
+      setCachedPrompt(cacheKey, systemPromptTemplate);
       profile.push({ stage: 'prompt_build_cold', durationMs: Date.now() - t1 });
     } else {
       profile.push({ stage: 'prompt_build_cache_hit', durationMs: Date.now() - t1 });
     }
+
+    // Interpolate formData values directly into the system prompt.
+    // This replaces {{placeholders}} with ACTUAL values BEFORE sending to AI,
+    // preventing the model from inventing or replacing supplied facts.
+    const systemPrompt = postInterpolate(systemPromptTemplate, req.formData);
 
     t1 = Date.now();
     const userMessage = buildUserMessage(req);

@@ -12,36 +12,68 @@ import { Router, Request, Response } from 'express';
 
 export const aiRouter = Router();
 
-// ── Dynamically load AI config ──────────────────────────────────────
-
-async function getAiClient() {
-  const { getActiveConfig } = await import('../services/aiService');
-  const config = getActiveConfig();
-  let Anthropic: any;
-  try {
-    const sdk = await import('@anthropic-ai/sdk');
-    Anthropic = sdk.default ?? sdk.Anthropic;
-  } catch {
-    throw new Error('@anthropic-ai/sdk is not installed.');
-  }
-  const client = new Anthropic({
-    apiKey: config.apiKey,
-    ...(config.baseURL ? { baseURL: config.baseURL } : {}),
-  });
-  return { client, config };
-}
+// ── Unified AI call helper ─────────────────────────────────────────
 
 async function callAi(systemPrompt: string, userMessage: string, maxTokens: number = 8000): Promise<string> {
-  const { client, config } = await getAiClient();
+  const { getActiveConfig } = await import('../services/aiService');
+  const config = getActiveConfig();
+
+  if (config.provider === 'deepseek') {
+    // Use official DeepSeek OpenAI-compatible endpoint
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) throw new Error('DEEPSEEK_API_KEY not configured');
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90_000);
+
+    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage },
+        ],
+        max_tokens: maxTokens,
+        temperature: 0.7,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`DeepSeek API ${response.status}: ${errText.substring(0, 200)}`);
+    }
+
+    const data: any = await response.json();
+    const content: string = data.choices?.[0]?.message?.content ?? '';
+    return content.replace(/\*\*/g, '').replace(/__/g, '');
+  }
+
+  // Claude fallback via Anthropic SDK
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured for Claude fallback');
+
+  const AnthropicModule = await import('@anthropic-ai/sdk');
+  const Anthropic = AnthropicModule.default ?? AnthropicModule.Anthropic;
+  const client = new Anthropic({ apiKey });
+
   const response = await client.messages.create({
     model: config.model,
     max_tokens: maxTokens,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
   });
-  if (typeof response.content === 'string') return response.content.replace(/\*\*/g, '').replace(/__/g, '');
-  if (Array.isArray(response.content)) {
-    return response.content
+
+  const content: any = response.content;
+  if (typeof content === 'string') return content.replace(/\*\*/g, '').replace(/__/g, '');
+  if (Array.isArray(content)) {
+    return content
       .filter((block: any) => block.type === 'text')
       .map((block: any) => block.text)
       .join('\n')
