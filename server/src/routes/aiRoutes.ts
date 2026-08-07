@@ -136,7 +136,7 @@ ${officeType ? `कार्यालय प्रकार: ${officeType}` : ''
 केवल संशोधित आवेदन पत्र लौटाएं:`;
 
   try {
-    const text = await callAi(sysPrompt, userMsg, Math.min(originalText.length * 2, 8000));
+    const text = await callAi(sysPrompt, userMsg, Math.max(Math.min(originalText.length * 2, 8000), 2000));
     const { getActiveConfig } = await import('../services/aiService');
     const config = getActiveConfig();
     res.json({
