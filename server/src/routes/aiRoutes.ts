@@ -74,9 +74,6 @@ async function callAi(systemPrompt: string, userMessage: string, maxTokens: numb
 
     const data: any = await response.json();
     const content: string = data.choices?.[0]?.message?.content ?? '';
-    const hasNonAscii = [...content].some((c: string) => c.charCodeAt(0) > 127);
-    const qCount = (content.match(/\?/g) || []).length;
-    console.log(`[callAi] chars=${content.length} nonAscii=${hasNonAscii} qmarks=${qCount} preview=${JSON.stringify(content.substring(0, 40))}`);
     return content.replace(/\*\*/g, '').replace(/__/g, '');
   }
 
@@ -150,14 +147,15 @@ ${factBlock}
 
 aiRouter.post('/revise-application', async (req: Request, res: Response) => {
   console.log('[POST /revise-application] Received.');
-  const { originalText, correctionInstruction, formData } = req.body ?? {};
+  const { originalText, correctionInstruction, originalFormData, formData } = req.body ?? {};
 
   if (!originalText || !correctionInstruction) {
     res.status(400).json({ error: 'Missing required fields: originalText, correctionInstruction' });
     return;
   }
 
-  const factBlock = formData ? buildFactBlock(formData) : '';
+  const protectedFormData = originalFormData ?? formData ?? {};
+  const factBlock = buildFactBlock(protectedFormData);
 
   const sysPrompt = '\u0906\u092A \u0939\u093F\u0902\u0926\u0940 \u0938\u0930\u0915\u093E\u0930\u0940 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930 \u0938\u0902\u092A\u093E\u0926\u0915 \u0939\u0948\u0902\u0964 \u092E\u0942\u0932 \u0906\u0935\u0947\u0926\u0928 \u092E\u0947\u0902 \u0926\u093F\u090F \u0917\u090F \u0938\u092D\u0940 \u0928\u093E\u092E, \u092A\u0924\u0947, \u0924\u093E\u0930\u0940\u0916\u0947\u0902, \u0930\u093E\u0936\u093F\u092F\u093E\u0901 \u0914\u0930 \u0924\u0925\u094D\u092F\u094B\u0902 \u0915\u094B \u091C\u094D\u092F\u094B\u0902 \u0915\u093E \u0924\u094D\u092F\u094B\u0902 \u0930\u0916\u0947\u0902\u0964 \u0915\u0947\u0935\u0932 \u0938\u0941\u0927\u093E\u0930 \u0928\u093F\u0930\u094D\u0926\u0947\u0936 \u092E\u0947\u0902 \u0915\u0939\u0940 \u0917\u0908 \u092C\u093E\u0924\u0947\u0902 \u092C\u0926\u0932\u0947\u0902\u0964 \u092C\u093E\u0915\u0940 \u0938\u092C \u091C\u094D\u092F\u094B\u0902 \u0915\u093E \u0924\u094D\u092F\u094B\u0902 \u0930\u0916\u0947\u0902\u0964 \u0915\u0947\u0935\u0932 \u0938\u0902\u0936\u094B\u0927\u093F\u0924 \u092A\u093E\u0920 \u0932\u094C\u091F\u093E\u090F\u0902, \u0915\u094B\u0908 \u0938\u094D\u092A\u0937\u094D\u091F\u0940\u0915\u0930\u0923 \u0928\u0939\u0940\u0902\u0964 \u092E\u093E\u0930\u094D\u0915\u0921\u093E\u0909\u0928 \u0928\u0939\u0940\u0902\u0964';
 
