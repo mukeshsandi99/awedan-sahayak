@@ -1,16 +1,14 @@
 /**
  * AI Router — Central AI Request Orchestrator
  *
- * All AI requests flow through this module. It handles:
- *   - Provider selection (primary + fallback)
- *   - Retry with exponential backoff + jitter
- *   - Total deadline enforcement
- *   - Duplicate request detection
+ * Optimizations:
+ *   - Prompt caching (memory, keyed by officeType+applicationName)
+ *   - Dynamic max_tokens per application type
+ *   - Request profiling (stage timings)
+ *   - Exponential backoff with longer delays for 429
  *   - Circuit breaker for failing providers
- *   - Cost tracking
- *   - Safe logging
- *
- * No route should call provider SDKs directly.
+ *   - In-flight dedup (same content → reuse promise)
+ *   - Safe logging (no PII)
  */
 
 import { createLogger } from '../../config/logger';
@@ -20,31 +18,41 @@ import { ClaudeProvider } from './ClaudeProvider';
 import { DeepSeekProvider } from './DeepSeekProvider';
 import { validateInput, validateOutput, qualityScore, AICostTracker } from './AIValidator';
 import { validateFacts } from './FactValidator';
-import { extractFacts } from './FactExtractor';
 import { AICircuitBreaker } from './AICircuitBreaker';
 import crypto from 'crypto';
 
 const log = createLogger('AIRouter');
 
-// ── Provider registry ────────────────────────────────────────────────────
+// ── Prompt cache ────────────────────────────────────────────────────────
+// Reuses built prompts across requests to avoid repeated string building.
+
+const promptCache = new Map<string, { prompt: string; cachedAt: number }>();
+const PROMPT_CACHE_TTL_MS = 30 * 60_000; // 30 min
+
+function getCachedPrompt(key: string): string | null {
+  const entry = promptCache.get(key);
+  if (entry && (Date.now() - entry.cachedAt) < PROMPT_CACHE_TTL_MS) {
+    return entry.prompt;
+  }
+  promptCache.delete(key);
+  return null;
+}
+
+function setCachedPrompt(key: string, prompt: string): void {
+  promptCache.set(key, { prompt, cachedAt: Date.now() });
+}
+
+// ── Provider registry ───────────────────────────────────────────────────
 
 const providers: Map<string, IAIProvider> = new Map();
 
 function getProvider(name: string): IAIProvider | null {
   const existing = providers.get(name);
   if (existing) return existing;
-
   let provider: IAIProvider | null = null;
-  if (name === 'claude') {
-    provider = new ClaudeProvider();
-  } else if (name === 'deepseek') {
-    provider = new DeepSeekProvider();
-  }
-
-  if (provider) {
-    providers.set(name, provider);
-    log.info(`Provider registered: ${name} (${provider.model})`);
-  }
+  if (name === 'claude') provider = new ClaudeProvider();
+  else if (name === 'deepseek') provider = new DeepSeekProvider();
+  if (provider) { providers.set(name, provider); log.info(`Provider registered: ${name} (${provider.model})`); }
   return provider;
 }
 
@@ -58,121 +66,173 @@ function getFallbackProvider(): IAIProvider | null {
   return getProvider(AIConfig.fallbackProvider);
 }
 
-// ── Retry logic ──────────────────────────────────────────────────────────
+// ── Dynamic max_tokens per application type ────────────────────────────
+
+function getMaxTokensForApp(applicationName: string, officeType: string): number {
+  const app = applicationName.toLowerCase();
+  // Police / detailed complaints need more tokens
+  if (/मारपीट|शिकायत|FIR|विवाद|अपराध|धमकी|चोरी|लूट/i.test(app)) return 1500;
+  // Land / registry / property need medium
+  if (/जमीन|नामांतरण|रजिस्ट्री|खतियान|दाखिल|मापी|कब्जा|राजस्व/i.test(app)) return 1400;
+  // Certificates / simple requests need fewer
+  if (/प्रमाण|पत्र|आय|जाति|निवास|जन्म|मृत्यु/i.test(app)) return 1000;
+  // Bank / school
+  if (officeType === 'bank') return 1000;
+  if (officeType === 'school' || officeType === 'college') return 1000;
+  return 1200; // default
+}
+
+// ── Retry logic with 429-aware backoff ──────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function backoffDelay(attempt: number): number {
-  const base = AIConfig.retryBaseDelayMs;
-  const max = AIConfig.retryMaxDelayMs;
+function backoffDelay(attempt: number, isRateLimit: boolean = false): number {
+  const base = isRateLimit ? AIConfig.rateLimitBaseDelayMs : AIConfig.retryBaseDelayMs;
+  const max = isRateLimit ? AIConfig.rateLimitMaxDelayMs : AIConfig.retryMaxDelayMs;
   const exp = Math.min(base * Math.pow(2, attempt), max);
-  const jitter = Math.random() * 0.3 * exp; // 0-30% jitter
+  const jitter = Math.random() * 0.3 * exp;
   return Math.floor(exp + jitter);
 }
 
 function isRetryable(error: any): boolean {
-  const msg = error?.message ?? error?.code ?? '';
   const code = error?.status ?? error?.code ?? 0;
   if (code === 429) return true;
   if (code >= 500 && code < 600) return true;
+  const msg = error?.message ?? '';
   if (/timeout|timed ?out|ECONNRESET|ETIMEDOUT|ENOTFOUND|network/i.test(msg)) return true;
   return false;
+}
+
+function isRateLimit(error: any): boolean {
+  return (error?.status ?? error?.code ?? 0) === 429;
 }
 
 function isNonRetryable(error: any): boolean {
   const code = error?.status ?? 0;
   if (code === 400 || code === 401 || code === 403 || code === 404) return true;
-  const msg = error?.message ?? '';
-  if (/invalid|unsafe|too.?large|auth/i.test(msg)) return true;
+  if (/invalid|unsafe|too.?large|auth/i.test(error?.message ?? '')) return true;
   return false;
 }
 
-// ── Dedup ────────────────────────────────────────────────────────────────
+// ── In-flight dedup ─────────────────────────────────────────────────────
 
 const inflightRequests = new Map<string, Promise<AIResponse>>();
-
-/**
- * Builds a content-based SHA-256 hash from actual request content.
- * Different content with same length → different hash.
- * Uses Unicode NFC normalization + whitespace trim for consistency.
- * NEVER logs the raw prompt or hash input.
- */
-function hashRequest(req: AIRequest): string {
-  const normalise = (s: string): string =>
-    s.normalize('NFC').replace(/\s+/g, ' ').trim();
-  const payload = JSON.stringify({
-    op: 'generate',
-    sys: normalise(req.systemPrompt),
-    user: normalise(req.userMessage),
-    max: req.maxTokens ?? 4000,
-  });
-  return crypto.createHash('sha256').update(payload).digest('hex');
-}
-
-/** Enforce max concurrent in-flight requests. */
 const MAX_INFLIGHT = parseInt(process.env.AI_MAX_INFLIGHT_REQUESTS ?? '100', 10);
 
-// REMOVED: completedHashes map — completed personal AI output is NEVER cached.
-// Only in-flight dedup is supported (same request already running → reuse Promise).
-// Once the request completes (success or failure), the entry is immediately deleted.
+function hashRequest(req: AIRequest): string {
+  const normalise = (s: string): string => s.normalize('NFC').replace(/\s+/g, ' ').trim();
+  return crypto.createHash('sha256').update(JSON.stringify({
+    sys: normalise(req.systemPrompt), user: normalise(req.userMessage), max: req.maxTokens ?? 1200,
+  })).digest('hex');
+}
 
-// ── Circuit breakers ─────────────────────────────────────────────────────
+// ── Circuit breakers ────────────────────────────────────────────────────
 
 const circuitBreakers = new Map<string, AICircuitBreaker>();
 
 function getCircuitBreaker(name: string): AICircuitBreaker {
   let cb = circuitBreakers.get(name);
-  if (!cb) {
-    cb = new AICircuitBreaker(AIConfig.circuitFailureThreshold, AIConfig.circuitResetMs);
-    circuitBreakers.set(name, cb);
-  }
+  if (!cb) { cb = new AICircuitBreaker(AIConfig.circuitFailureThreshold, AIConfig.circuitResetMs); circuitBreakers.set(name, cb); }
   return cb;
 }
 
-// ── Main Router ──────────────────────────────────────────────────────────
+// ── Profiling ───────────────────────────────────────────────────────────
+
+interface RequestProfile {
+  stage: string;
+  durationMs: number;
+}
+
+// ── Main Router ─────────────────────────────────────────────────────────
 
 export const AIRouter = {
-  /**
-   * Generate a standard templated application.
-   * Handles provider selection, retry, fallback, dedup internally.
-   */
   async generateApplication(req: AIGenerateRequest): Promise<AIResponse> {
-    const systemPrompt = buildSystemPrompt(req.officeType, req.applicationName);
+    const profile: RequestProfile[] = [];
+    const t0 = Date.now();
+
+    // Step 1: Build prompts (with cache)
+    let t1 = Date.now();
+    const cacheKey = `gen:${req.officeType}:${req.applicationName}`;
+    let systemPrompt = getCachedPrompt(cacheKey);
+    if (!systemPrompt) {
+      systemPrompt = buildSystemPrompt(req.officeType, req.applicationName);
+      setCachedPrompt(cacheKey, systemPrompt);
+      profile.push({ stage: 'prompt_build_cold', durationMs: Date.now() - t1 });
+    } else {
+      profile.push({ stage: 'prompt_build_cache_hit', durationMs: Date.now() - t1 });
+    }
+
+    t1 = Date.now();
     const userMessage = buildUserMessage(req);
+    profile.push({ stage: 'user_message_build', durationMs: Date.now() - t1 });
+
+    // Step 2: Validate input
+    t1 = Date.now();
     const inputErr = validateInput({ systemPrompt, userMessage });
     if (inputErr) throw Object.assign(new Error(inputErr), { code: 'AI_INVALID_INPUT' });
+    profile.push({ stage: 'input_validation', durationMs: Date.now() - t1 });
 
-    const result = await dispatchWithRetry({ systemPrompt, userMessage });
-    return validateAndRepair(result, req.formData, systemPrompt);
+    // Step 3: Dynamic max_tokens
+    const maxTokens = getMaxTokensForApp(req.applicationName, req.officeType);
+
+    // Step 4: AI call
+    t1 = Date.now();
+    const result = await dispatchWithRetry({ systemPrompt, userMessage, maxTokens }, profile);
+    profile.push({ stage: 'ai_call_total', durationMs: Date.now() - t1 });
+
+    // Step 5: Validate
+    t1 = Date.now();
+    (result as any)._requestStartMs = t0;
+    const final = await validateAndRepair(result, req.formData, systemPrompt);
+    profile.push({ stage: 'validation_repair', durationMs: Date.now() - t1 });
+
+    // Step 6: Log profile
+    const totalMs = Date.now() - t0;
+    log.info(`[AIRouter] Profile: total=${totalMs}ms tokens=${maxTokens} ${profile.map(p => `${p.stage}=${p.durationMs}ms`).join(' ')}`);
+
+    return final;
   },
 
-  /** Generate a custom/blank application. */
   async generateCustomApplication(req: AICustomGenerateRequest): Promise<AIResponse> {
+    const profile: RequestProfile[] = [];
+    const t0 = Date.now();
+
+    let t1 = Date.now();
     const systemPrompt = buildCustomSystemPrompt(req.officeName, req.recipientDesignation);
+    profile.push({ stage: 'prompt_build', durationMs: Date.now() - t1 });
+
+    t1 = Date.now();
     const userMessage = buildCustomUserMessage(req);
+    profile.push({ stage: 'user_message_build', durationMs: Date.now() - t1 });
+
+    t1 = Date.now();
     const inputErr = validateInput({ systemPrompt, userMessage });
     if (inputErr) throw Object.assign(new Error(inputErr), { code: 'AI_INVALID_INPUT' });
+    profile.push({ stage: 'input_validation', durationMs: Date.now() - t1 });
 
-    const result = await dispatchWithRetry({ systemPrompt, userMessage });
-    return validateAndRepair(result, req.formData, systemPrompt);
+    t1 = Date.now();
+    const result = await dispatchWithRetry({ systemPrompt, userMessage, maxTokens: 1000 }, profile);
+    profile.push({ stage: 'ai_call_total', durationMs: Date.now() - t1 });
+
+    t1 = Date.now();
+    (result as any)._requestStartMs = t0;
+    const final = await validateAndRepair(result, req.formData, systemPrompt);
+    profile.push({ stage: 'validation_repair', durationMs: Date.now() - t1 });
+
+    log.info(`[AIRouter] Profile custom: total=${Date.now() - t0}ms ${profile.map(p => `${p.stage}=${p.durationMs}ms`).join(' ')}`);
+    return final;
   },
 
-  /** Clean up OCR text (typo/error correction). */
   async cleanupText(rawText: string): Promise<AIResponse> {
-    const systemPrompt =
-      'You are a Hindi proofreader. Fix ONLY clear typos and OCR errors. ' +
-      'Do NOT rewrite, rephrase, or change the meaning. Preserve all names, ' +
-      'dates, places, and numbers exactly. Return the corrected text only.';
-    const userMessage = `Correct OCR typos in this text:\n\n${rawText.substring(0, AIConfig.maxTotalInputLength)}`;
-    const inputErr = validateInput({ systemPrompt, userMessage });
-    if (inputErr) throw Object.assign(new Error(inputErr), { code: 'AI_INVALID_INPUT' });
-
-    return dispatchWithRetry({ systemPrompt, userMessage, maxTokens: Math.min(rawText.length * 2, 4000) });
+    return dispatchWithRetry({
+      systemPrompt: 'You are a Hindi proofreader. Fix ONLY clear typos and OCR errors. Do NOT rewrite. Return corrected text only.',
+      userMessage: `Correct OCR typos:\n\n${rawText.substring(0, AIConfig.maxTotalInputLength)}`,
+      maxTokens: Math.min(rawText.length * 2, 2000),
+    }, []);
   },
 
-  /** Check if any provider is healthy. */
   async healthCheck(): Promise<{ ok: boolean; primary: boolean; fallback: boolean }> {
     const primary = getPrimaryProvider();
     const fallback = getFallbackProvider();
@@ -183,196 +243,213 @@ export const AIRouter = {
     return { ok: pOk || fOk, primary: pOk, fallback: fOk };
   },
 
-  /** Get the name of the current primary provider. */
-  getActiveProvider(): string {
-    return AIConfig.primaryProvider;
-  },
+  getActiveProvider(): string { return AIConfig.primaryProvider; },
 };
 
-// ── Fact validation + repair ─────────────────────────────────────────────
+// ── Time budget constants ────────────────────────────────────────────────
+
+const TOTAL_BUDGET_MS = 90_000;
+const REPAIR_MIN_BUDGET_MS = 25_000;
+
+// ── Critical failure detection ───────────────────────────────────────────
+
+interface DraftAssessment {
+  criticalFailures: string[];
+  nonCriticalIssues: string[];
+  qualityScore: number;
+  factsPassed: boolean;
+  factScore: number;
+}
+
+function assessDraft(result: AIResponse, formData: Record<string, string>): DraftAssessment {
+  const qScore = qualityScore(result.generatedText);
+  const factResult = validateFacts(formData, result.generatedText);
+  const criticalFailures: string[] = [];
+  const nonCriticalIssues: string[] = [];
+
+  if (!result.generatedText || result.generatedText.trim().length < 50) {
+    criticalFailures.push('Empty or near-empty output');
+  }
+  if (qScore < 30) {
+    criticalFailures.push(`Quality score critically low: ${qScore}`);
+  }
+  const criticalMismatches = factResult.mismatches.filter(m => m.severity === 'critical');
+  if (criticalMismatches.length > 0) {
+    criticalFailures.push(`${criticalMismatches.length} critical fact mismatch(es)`);
+  }
+  const nonCriticalMismatches = factResult.mismatches.filter(m => m.severity !== 'critical');
+  if (nonCriticalMismatches.length > 0) {
+    nonCriticalIssues.push(`${nonCriticalMismatches.length} non-critical mismatch(es)`);
+  }
+  if (qScore >= 30 && qScore < 70 && criticalFailures.length === 0) {
+    nonCriticalIssues.push(`Style score below target: ${qScore}/100`);
+  }
+
+  return { criticalFailures, nonCriticalIssues, qualityScore: qScore, factsPassed: factResult.passed, factScore: factResult.score };
+}
+
+// ── validateAndRepair ────────────────────────────────────────────────────
 
 async function validateAndRepair(
   initialResult: AIResponse,
   formData: Record<string, string>,
-  systemPrompt: string,
+  _systemPrompt: string,
 ): Promise<AIResponse> {
-  const qScore = qualityScore(initialResult.generatedText);
-  const factResult = validateFacts(formData, initialResult.generatedText);
-  const criticalCount = factResult.mismatches.filter((m) => m.severity === 'critical').length;
-  const warningCount   = factResult.mismatches.filter((m) => m.severity === 'warning').length;
+  const requestStart = (initialResult as any)._requestStartMs ?? Date.now();
+  const elapsed = Date.now() - requestStart;
+  const assessment = assessDraft(initialResult, formData);
 
-  // Always log validation metrics
-  log.info(
-    `[AIRouter] Validation: qualityScore=${qScore} factScore=${factResult.score} ` +
-    `criticalCount=${criticalCount} warningCount=${warningCount}`,
-  );
+  log.info(`[AIRouter] Assessment: Q=${assessment.qualityScore} F=${assessment.factScore} crit=${assessment.criticalFailures.length} nonCrit=${assessment.nonCriticalIssues.length} elapsed=${elapsed}ms`);
 
-  // Rule 1: quality >= 90 AND no critical errors -> accept immediately
-  if (qScore >= 90 && criticalCount === 0) {
-    log.info(`[AIRouter] qualityScore=${qScore}>=90, criticalCount=0, accepting without repair.`);
+  // No critical failures → return immediately
+  if (assessment.criticalFailures.length === 0) {
+    initialResult.qualityScore = assessment.qualityScore;
+    initialResult.repairApplied = false;
+    initialResult.refinementAvailable = assessment.nonCriticalIssues.length > 0;
     return initialResult;
   }
 
-  // Rule 2: No critical errors (warnings only) -> accept, no repair
-  if (criticalCount === 0) {
-    log.info(`[AIRouter] criticalCount=0, warningCount=${warningCount}, accepting (warnings only, no repair needed).`);
+  // Critical failures → check time budget
+  log.warn(`[AIRouter] Critical: ${assessment.criticalFailures.join('; ')}`);
+  const remaining = TOTAL_BUDGET_MS - elapsed;
+  if (remaining < REPAIR_MIN_BUDGET_MS) {
+    log.warn(`[AIRouter] No time for repair (${remaining}ms < ${REPAIR_MIN_BUDGET_MS}ms)`);
+    initialResult.qualityScore = assessment.qualityScore;
+    initialResult.repairApplied = false;
+    initialResult.refinementAvailable = true;
     return initialResult;
   }
 
-  // Rule 3: Critical errors detected -> attempt repair
-  const repairTriggered = true;
-  log.warn(
-    `[AIRouter] Quality=${qScore}, factScore=${factResult.score}, ` +
-    `criticalCount=${criticalCount}, warningCount=${warningCount}, repairTriggered=${repairTriggered}`,
-  );
-
+  // Attempt repair
   try {
-    const repairPrompt = factResult.repairPrompt ??
-      `Fix factual errors in this draft. Ensure all names, dates, places match the form data exactly.\n\n${initialResult.generatedText.substring(0, 500)}`;
-    const repairRequest: AIRequest = {
-      systemPrompt: repairPrompt,
-      userMessage: `Fix this draft:\n\n${initialResult.generatedText}`,
-      maxTokens: Math.max(initialResult.generatedText.length + 500, 2000),
-    };
+    const repairPrompt = buildCriticalRepairPrompt(assessment.criticalFailures, formData, initialResult.generatedText);
+    const repairTokens = Math.min(Math.max(initialResult.generatedText.length + 500, 1000), 2000);
+    const repairResult = await dispatchWithRetry({
+      systemPrompt: 'Fix only the listed issues. Keep everything else identical. Return full corrected text.',
+      userMessage: repairPrompt,
+      maxTokens: repairTokens,
+    }, []);
 
-    const repairedResult = await dispatchWithRetry(repairRequest);
-    const repairedScore = qualityScore(repairedResult.generatedText);
-    const repairedFactResult = validateFacts(formData, repairedResult.generatedText);
-    const repairedCritical = repairedFactResult.mismatches.filter((m) => m.severity === 'critical').length;
-
-    const repairSucceeded = repairedScore > qScore || repairedCritical < criticalCount;
-
-    log.info(
-      `[AIRouter] Repair result: qualityScore=${repairedScore} factScore=${repairedFactResult.score} ` +
-      `criticalCount=${repairedCritical} repairTriggered=true repairSucceeded=${repairSucceeded}`,
-    );
-
-    if (repairSucceeded) {
-      log.info(`[AIRouter] Repair improved: Q=${qScore}->${repairedScore} C=${criticalCount}->${repairedCritical}`);
-      repairedResult.fallbackUsed = initialResult.fallbackUsed;
-      return repairedResult;
+    const repairedAssessment = assessDraft(repairResult, formData);
+    if (repairedAssessment.criticalFailures.length < assessment.criticalFailures.length) {
+      log.info(`[AIRouter] Repair OK: crit ${assessment.criticalFailures.length}→${repairedAssessment.criticalFailures.length}`);
+      repairResult.fallbackUsed = initialResult.fallbackUsed;
+      repairResult.qualityScore = repairedAssessment.qualityScore;
+      repairResult.repairApplied = true;
+      repairResult.refinementAvailable = repairedAssessment.nonCriticalIssues.length > 0;
+      return repairResult;
     }
-
-    // Repair didn't help, accept original if quality is passable
-    if (qScore >= 50) {
-      log.warn(`[AIRouter] Repair didn't improve, but qualityScore=${qScore}>=50, accepting original.`);
-      return initialResult;
-    }
-
-    // Quality too low even after repair failure -> truly unusable
-    log.error(`[AIRouter] qualityScore=${qScore}<50 after repair failure, rejecting.`);
-    throw Object.assign(new Error('AI output quality too low after repair failure.'), { code: 'AI_FACT_MISMATCH' });
-
-  } catch (err: any) {
-    if (err.code === 'AI_FACT_MISMATCH') throw err;
-    // Network / timeout during repair -> accept original if passable
-    if (qScore >= 50) {
-      log.warn(`[AIRouter] Repair errored (${err.message?.substring(0, 60)}), but qualityScore=${qScore}>=50, accepting original.`);
-      return initialResult;
-    }
-    throw Object.assign(new Error('AI output quality too low.'), { code: 'AI_OUTPUT_INVALID' });
+    log.warn('[AIRouter] Repair did not help — returning original');
+  } catch (e: any) {
+    log.warn(`[AIRouter] Repair failed: ${e?.message?.substring(0, 60)}`);
   }
+
+  initialResult.qualityScore = assessment.qualityScore;
+  initialResult.repairApplied = false;
+  initialResult.refinementAvailable = true;
+  return initialResult;
 }
 
-// ── Core dispatch logic ──────────────────────────────────────────────────
+function buildCriticalRepairPrompt(failures: string[], formData: Record<string, string>, draft: string): string {
+  const fields = Object.entries(formData).filter(([, v]) => v?.trim()).map(([k, v]) => `${k}: ${v}`);
+  return `FIX THESE ISSUES:\n${failures.map((f, i) => `${i + 1}. ${f}`).join('\n')}\n\nFORM DATA:\n${fields.join('\n')}\n\nDRAFT:\n${draft}`;
+}
 
-async function dispatchWithRetry(request: AIRequest): Promise<AIResponse> {
+// ── Core dispatch ────────────────────────────────────────────────────────
+
+async function dispatchWithRetry(request: AIRequest, profile: RequestProfile[]): Promise<AIResponse> {
   const reqHash = hashRequest(request);
   const deadline = Date.now() + AIConfig.totalTimeoutMs;
 
-  // Enforce max concurrent limit
   if (inflightRequests.size >= MAX_INFLIGHT) {
-    throw Object.assign(
-      new Error('बहुत अधिक अनुरोध — कृपया कुछ समय बाद पुनः प्रयास करें। / Too many requests — please try again later.'),
-      { code: 'AI_RATE_LIMITED' },
-    );
+    throw Object.assign(new Error('Rate limited — too many requests'), { code: 'AI_RATE_LIMITED' });
   }
 
-  // Dedup: in-flight identical request → reuse the same Promise
   const existing = inflightRequests.get(reqHash);
-  if (existing) {
-    log.info('[AIRouter] ⏭️  Reusing in-flight duplicate request (same content).');
-    return existing;
-  }
+  if (existing) { log.info('[AIRouter] Reusing in-flight duplicate'); return existing; }
 
-  // Run the request
-  const promise = _doDispatch(request, deadline);
+  const promise = _doDispatch(request, deadline, profile);
   inflightRequests.set(reqHash, promise);
-  try {
-    const result = await promise;
-    return result; // Success — entry deleted in finally
-  } finally {
-    inflightRequests.delete(reqHash); // Always cleanup (success, failure, timeout)
-  }
+  try { return await promise; }
+  finally { inflightRequests.delete(reqHash); }
 }
 
-async function _doDispatch(request: AIRequest, deadline: number): Promise<AIResponse> {
+async function _doDispatch(request: AIRequest, deadline: number, profile: RequestProfile[]): Promise<AIResponse> {
   const primary = getPrimaryProvider();
   if (!primary) throw Object.assign(new Error('No AI provider configured.'), { code: 'AI_INTERNAL_ERROR' });
 
   const primaryCB = getCircuitBreaker(primary.name);
   const fallback = getFallbackProvider();
-  const fallbackCB = fallback ? getCircuitBreaker(fallback.name) : null;
 
-  // Try primary with retry
   try {
-    return await executeWithRetry(primary, request, deadline, primaryCB);
+    const t1 = Date.now();
+    const result = await executeWithRetry(primary, request, deadline, primaryCB, profile);
+    profile.push({ stage: 'primary_api', durationMs: Date.now() - t1 });
+    return result;
   } catch (firstErr: any) {
     if (isNonRetryable(firstErr)) throw firstErr;
-    log.warn(`[AIRouter] Primary ${primary.name} failed: ${firstErr?.message?.substring(0, 80)}`);
 
-    if (!fallback) {
-      throw Object.assign(new Error(firstErr?.message ?? 'AI provider failed'), { code: 'AI_ALL_PROVIDERS_FAILED' });
-    }
+    // Log failure details
+    logFailure(primary.name, firstErr, request);
 
-    // Try fallback (single attempt, no retry)
+    if (!fallback) throw firstErr;
+
     try {
+      log.info(`[AIRouter] Falling back to ${fallback.name}...`);
+      const t1 = Date.now();
       const result = await primaryCall(fallback, request, deadline);
       result.fallbackUsed = true;
+      profile.push({ stage: 'fallback_api', durationMs: Date.now() - t1 });
       AICostTracker.recordCall(fallback.name, result.usage, true);
-      log.info(`[AIRouter] ✅ Fallback ${fallback.name} succeeded.`);
       return result;
     } catch (fallbackErr: any) {
-      log.error(`[AIRouter] Both providers failed. Primary: ${firstErr?.message}, Fallback: ${fallbackErr?.message}`);
-      throw Object.assign(new Error('All AI providers are currently unavailable. कृपया बाद में पुनः प्रयास करें।'), {
-        code: 'AI_ALL_PROVIDERS_FAILED',
-      });
+      logFailure(fallback.name, fallbackErr, request);
+      throw Object.assign(new Error('All AI providers unavailable'), { code: 'AI_ALL_PROVIDERS_FAILED' });
     }
   }
 }
 
+function logFailure(provider: string, error: any, _request: AIRequest): void {
+  const status = error?.status ?? error?.code ?? 'unknown';
+  const msg = error?.message?.substring(0, 120) ?? 'unknown';
+  log.error(`[AI_FAIL] provider=${provider} status=${status} latency=${error?.latencyMs ?? '?'}ms tokens=${error?.tokenCount ?? '?'}  error="${msg}"`);
+}
+
 async function executeWithRetry(
-  provider: IAIProvider,
-  request: AIRequest,
-  deadline: number,
-  circuitBreaker: AICircuitBreaker,
+  provider: IAIProvider, request: AIRequest, deadline: number,
+  circuitBreaker: AICircuitBreaker, profile: RequestProfile[],
 ): Promise<AIResponse> {
   let lastError: any;
 
   for (let attempt = 0; attempt <= AIConfig.maxRetries; attempt++) {
     if (Date.now() >= deadline) {
-      throw Object.assign(new Error('AI request timed out. कृपया पुनः प्रयास करें।'), { code: 'AI_TIMEOUT' });
+      throw Object.assign(new Error('AI timeout'), { code: 'AI_TIMEOUT' });
     }
 
     try {
+      const t1 = Date.now();
       const result = await primaryCall(provider, request, deadline);
+      const callMs = Date.now() - t1;
+      profile.push({ stage: `api_attempt_${attempt}`, durationMs: callMs });
       circuitBreaker.recordSuccess();
       AICostTracker.recordCall(provider.name, result.usage, false);
       return result;
     } catch (err: any) {
       lastError = err;
+      lastError.latencyMs = Date.now() - (lastError._startMs ?? Date.now());
       circuitBreaker.recordFailure();
 
       if (isNonRetryable(err)) throw err;
       if (attempt >= AIConfig.maxRetries) break;
 
-      const delay = backoffDelay(attempt);
-      log.warn(`[AIRouter] Retry ${attempt + 1}/${AIConfig.maxRetries} after ${delay}ms: ${err?.message?.substring(0, 60)}`);
+      const rateLimited = isRateLimit(err);
+      const delay = backoffDelay(attempt, rateLimited);
+      log.warn(`[AIRouter] ${rateLimited ? 'RATE_LIMIT' : 'Retry'} ${attempt + 1}/${AIConfig.maxRetries} delay=${delay}ms: ${err?.message?.substring(0, 60)}`);
       await sleep(delay);
     }
   }
 
-  throw lastError ?? new Error('AI provider failed after retries');
+  throw lastError ?? new Error('AI provider failed');
 }
 
 async function primaryCall(provider: IAIProvider, request: AIRequest, deadline: number): Promise<AIResponse> {
@@ -386,35 +463,31 @@ async function primaryCall(provider: IAIProvider, request: AIRequest, deadline: 
   const result = await Promise.race([provider.chat({ ...request }), timeoutPromise]);
   const validationErr = validateOutput(result.generatedText);
   if (validationErr) {
-    log.warn(`[AIRouter] Output validation failed: ${validationErr}`);
+    log.warn(`[AIRouter] Output validation: ${validationErr}`);
     throw Object.assign(new Error(validationErr), { code: 'AI_OUTPUT_INVALID' });
   }
   return result;
 }
 
-// ── Re-use existing prompt builders from aiService ───────────────────────
+// ── Prompt builders ──────────────────────────────────────────────────────
+
 import { buildSystemPrompt, buildCustomSystemPrompt } from '../aiService';
 
 function buildUserMessage(req: AIGenerateRequest): string {
-  // Simple template interpolation: replace {{key}} with values
   let filled = req.promptTemplate;
   for (const [key, value] of Object.entries(req.formData)) {
     filled = filled.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value || `({{${key}}})`);
   }
-  const applicantBlock = Object.entries(req.formData)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join('\n');
-  return `${filled}\n\nप्रार्थी की संपूर्ण जानकारी:\n${applicantBlock}`;
+  const applicantBlock = Object.entries(req.formData).map(([k, v]) => `${k}: ${v}`).join('\n');
+  return `${filled}\n\nप्रार्थी की जानकारी:\n${applicantBlock}`;
 }
 
 function buildCustomUserMessage(req: AICustomGenerateRequest): string {
-  const desc = req.formData?.custom_description ?? '';
   const identityBlock = Object.entries(req.formData)
     .filter(([k]) => k !== 'custom_description')
-    .map(([k, v]) => `${k}: ${v}`)
-    .join('\n');
+    .map(([k, v]) => `${k}: ${v}`).join('\n');
   let msg = `कार्यालय: ${req.officeName}`;
   if (req.recipientDesignation) msg += `\nपदनाम: ${req.recipientDesignation}`;
-  msg += `\n\n${desc}\n\nप्रार्थी की जानकारी:\n${identityBlock}`;
+  msg += `\n\n${req.formData?.custom_description ?? ''}\n\nप्रार्थी की जानकारी:\n${identityBlock}`;
   return msg;
 }

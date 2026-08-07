@@ -36,6 +36,12 @@ export interface AIResponse {
   usage?: { inputTokens: number; outputTokens: number };
   durationMs: number;
   fallbackUsed: boolean;
+  /** Quality score from local validation (0-100). */
+  qualityScore?: number;
+  /** Whether a second AI repair pass was applied. */
+  repairApplied?: boolean;
+  /** Whether the user should be offered an "AI सुधारें" button. */
+  refinementAvailable?: boolean;
 }
 
 // ── Provider interface ───────────────────────────────────────────────────

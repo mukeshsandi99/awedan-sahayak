@@ -43,21 +43,19 @@ interface RequiredVar {
   docsUrl?: string;
   /** If true, missing in production is fatal; in dev it's a warning. */
   devOptional?: boolean;
-  /** If true, never fatal — warning only in all environments. */
-  productionOptional?: boolean;
 }
 
+// ── AI key requirement ──────────────────────────────────────────────────
+//
+// AI keys are provider-dependent. The active provider's key is required;
+// the inactive provider's key is ignored entirely. This avoids forcing
+// production deployments to supply keys for providers they don't use.
+//
+// Validation happens in validateEnv() AFTER AI_PROVIDER is determined.
+//
+// Non-AI keys (Vision, APP_API_SECRET) are listed here unconditionally.
+
 const REQUIRED_VARS: RequiredVar[] = [
-  {
-    key: 'ANTHROPIC_API_KEY',
-    label: 'Anthropic API Key',
-    docsUrl: 'https://console.anthropic.com/settings/keys',
-  },
-  {
-    key: 'DEEPSEEK_API_KEY',
-    label: 'DeepSeek API Key',
-    docsUrl: 'https://platform.deepseek.com/api_keys',
-  },
   {
     key: 'GOOGLE_VISION_API_KEY',
     label: 'Google Cloud Vision API Key',
@@ -67,10 +65,23 @@ const REQUIRED_VARS: RequiredVar[] = [
   {
     key: 'APP_API_SECRET',
     label: 'App API Secret (shared secret for authentication)',
-    devOptional: true, // Optional everywhere — auth is disabled without it
-    productionOptional: true, // Do NOT block deployment — auth middleware falls back gracefully
+    devOptional: true, // Optional in dev — auth is disabled without it
   },
 ];
+
+// Provider → which key is required
+const AI_KEY_MAP: Record<string, { key: string; label: string; docsUrl: string }> = {
+  claude: {
+    key: 'ANTHROPIC_API_KEY',
+    label: 'Anthropic API Key',
+    docsUrl: 'https://console.anthropic.com/settings/keys',
+  },
+  deepseek: {
+    key: 'DEEPSEEK_API_KEY',
+    label: 'DeepSeek API Key',
+    docsUrl: 'https://platform.deepseek.com/api_keys',
+  },
+};
 
 const ALLOWED_NODE_ENVS = ['development', 'production', 'staging'] as const;
 
@@ -113,15 +124,12 @@ export function validateEnv(): void {
   const missing: string[] = [];
   const missingDev: string[] = [];
 
-  for (const { key, label, docsUrl, devOptional, productionOptional } of REQUIRED_VARS) {
+  for (const { key, label, docsUrl, devOptional } of REQUIRED_VARS) {
     const value = process.env[key];
     const isSet = typeof value === 'string' && value.trim().length > 0;
 
     if (!isSet) {
-      if (productionOptional) {
-        // Never fatal — warning in all environments
-        missingDev.push(`  • ${label} (${key}) — optional, auth/feature disabled without it`);
-      } else if (isProduction || !devOptional) {
+      if (isProduction || !devOptional) {
         missing.push(`  • ${label} (${key})${docsUrl ? `\n    → Get it at: ${docsUrl}` : ''}`);
       } else {
         missingDev.push(`  • ${label} (${key}) — optional in dev, required in production`);
@@ -129,18 +137,17 @@ export function validateEnv(): void {
     }
   }
 
-  // 4. Check cross-dependency: at least one AI key must match the provider
-  if (aiProvider === 'claude' && !process.env.ANTHROPIC_API_KEY) {
-    missing.push(
-      `  • ANTHROPIC_API_KEY is required when AI_PROVIDER="${aiProvider}"\n` +
-      '    → Get it at: https://console.anthropic.com/settings/keys',
-    );
-  }
-  if (aiProvider === 'deepseek' && !process.env.DEEPSEEK_API_KEY) {
-    missing.push(
-      `  • DEEPSEEK_API_KEY is required when AI_PROVIDER="${aiProvider}"\n` +
-      '    → Get it at: https://platform.deepseek.com/api_keys',
-    );
+  // 4. Provider-aware AI key check — ONLY the active provider's key is required
+  const aiKeyInfo = AI_KEY_MAP[aiProvider];
+  if (aiKeyInfo) {
+    const aiKeyValue = process.env[aiKeyInfo.key];
+    const aiKeySet = typeof aiKeyValue === 'string' && aiKeyValue.trim().length > 0;
+    if (!aiKeySet) {
+      missing.push(
+        `  • ${aiKeyInfo.label} (${aiKeyInfo.key}) is required when AI_PROVIDER="${aiProvider}"\n` +
+        `    → Get it at: ${aiKeyInfo.docsUrl}`,
+      );
+    }
   }
 
   // 5. Report findings

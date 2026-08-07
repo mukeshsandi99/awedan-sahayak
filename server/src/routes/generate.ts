@@ -9,48 +9,9 @@
 import { Router, Request, Response } from 'express';
 import { AIRouter } from '../services/ai/AIRouter';
 import { createLogger } from '../config/logger';
-import { AIConfig } from '../services/ai/AIConfig';
 import { aiLimiter } from '../middleware/rateLimit';
 
 const log = createLogger('Generate');
-
-// ── Error mapping ─────────────────────────────────────────────────────
-
-/** Map AI error codes to HTTP status codes. */
-function mapErrorToHttp(err: any): number {
-  const code = err?.code ?? '';
-  if (code === 'AI_TIMEOUT') return 504;
-  if (code === 'AI_RATE_LIMITED') return 429;
-  if (code === 'AI_INVALID_INPUT') return 400;
-  if (code === 'AI_FACT_MISMATCH') return 422;
-  if (code === 'AI_OUTPUT_INVALID') return 422;
-  if (code === 'AI_ALL_PROVIDERS_FAILED') return 502;
-  if (code === 'AI_INTERNAL_ERROR') return 500;
-  if (err?.status === 429) return 429;
-  if (err?.status >= 500) return 502;
-  return 500;
-}
-
-/** Return a user-facing Hindi + English error message for a given code. */
-function getErrorMessage(code: string): string {
-  switch (code) {
-    case 'AI_TIMEOUT':
-      return 'समय समाप्त — सर्वर व्यस्त है। कृपया पुनः प्रयास करें। / Request timed out — server is busy. Please try again.';
-    case 'AI_RATE_LIMITED':
-      return 'बहुत अधिक अनुरोध — कृपया कुछ समय बाद प्रयास करें। / Too many requests — please try again later.';
-    case 'AI_INVALID_INPUT':
-      return 'अमान्य इनपुट — कृपया सभी आवश्यक फ़ील्ड भरें। / Invalid input — please fill all required fields.';
-    case 'AI_FACT_MISMATCH':
-      return 'तथ्य सत्यापन विफल — AI द्वारा तथ्य सही नहीं रखे गए। कृपया पुनः प्रयास करें। / Fact verification failed — please try again.';
-    case 'AI_OUTPUT_INVALID':
-      return 'AI से अपूर्ण उत्तर — कृपया पुनः प्रयास करें। / Incomplete AI response — please try again.';
-    case 'AI_ALL_PROVIDERS_FAILED':
-      return 'सभी AI सेवाएं अनुपलब्ध — कृपया बाद में प्रयास करें। / All AI services unavailable — please try later.';
-    default:
-      return 'आवेदन पत्र जनरेट करने में त्रुटि। / Failed to generate application.';
-  }
-}
-
 
 export const generateRouter = Router();
 
@@ -124,7 +85,7 @@ generateRouter.post('/generate-application', async (req: Request, res: Response)
       formData,
     });
 
-    log.info(`[POST /generate-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed})`);
+    log.info(`[POST /generate-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed}, repair=${result.repairApplied ?? false}, qScore=${result.qualityScore ?? 'N/A'})`);
     res.json({
       success: true,
       generatedText: result.generatedText,
@@ -134,31 +95,16 @@ generateRouter.post('/generate-application', async (req: Request, res: Response)
         usage: result.usage,
         fallbackUsed: result.fallbackUsed,
         durationMs: result.durationMs,
+        qualityScore: result.qualityScore,
+        repairApplied: result.repairApplied ?? false,
+        refinementAvailable: result.refinementAvailable ?? false,
       },
     });
   } catch (err: any) {
-    const errorCode = err.code ?? 'AI_UNKNOWN';
-    const statusCode = mapErrorToHttp(err);
-    const errorDetail = {
-      code: errorCode,
-      message: err.message?.substring(0, 200) ?? 'Unknown error',
-      stack: err.stack?.substring(0, 500) ?? undefined,
-      statusCode,
-      timeout: errorCode === 'AI_TIMEOUT' ? AIConfig.totalTimeoutMs : undefined,
-      provider: err.provider ?? undefined,
-      timestamp: new Date().toISOString(),
-    };
-
-    log.error(
-      '[POST /generate-application] FAILED | code=' + errorCode + ' http=' + statusCode + ' | ' +
-      'msg="' + (err.message || '').substring(0, 120) + '" | ' +
-      'stack="' + (err.stack || '').substring(0, 200) + '"',
-    );
-
-    res.status(statusCode).json({
-      error: getErrorMessage(errorCode),
-      code: errorCode,
-      detail: process.env.NODE_ENV === 'development' ? errorDetail : { code: errorCode },
+    log.error('[POST /generate-application] Failed:', err.message);
+    res.status(500).json({
+      error: 'आवेदन पत्र जनरेट करने में त्रुटि। / Failed to generate application.',
+      detail: process.env.NODE_ENV === 'development' ? err.message : undefined,
     });
   }
 });
@@ -228,7 +174,7 @@ generateRouter.post('/generate-custom-application', async (req: Request, res: Re
       formData: enrichedFormData,
     });
 
-    log.info(`[POST /generate-custom-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed})`);
+    log.info(`[POST /generate-custom-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed}, repair=${result.repairApplied ?? false})`);
     res.json({
       success: true,
       generatedText: result.generatedText,
@@ -239,24 +185,16 @@ generateRouter.post('/generate-custom-application', async (req: Request, res: Re
         isCustom: true,
         fallbackUsed: result.fallbackUsed,
         durationMs: result.durationMs,
+        qualityScore: result.qualityScore,
+        repairApplied: result.repairApplied ?? false,
+        refinementAvailable: result.refinementAvailable ?? false,
       },
     });
   } catch (err: any) {
-    const errorCode = err.code ?? 'AI_UNKNOWN';
-    const statusCode = mapErrorToHttp(err);
-
-    log.error(
-      '[POST /generate-custom-application] FAILED | code=' + errorCode + ' http=' + statusCode + ' | ' +
-      'msg="' + (err.message || '').substring(0, 120) + '" | ' +
-      'stack="' + (err.stack || '').substring(0, 200) + '"',
-    );
-
-    res.status(statusCode).json({
-      error: getErrorMessage(errorCode),
-      code: errorCode,
-      detail: process.env.NODE_ENV === 'development'
-        ? { code: errorCode, message: err.message?.substring(0, 200), statusCode, timestamp: new Date().toISOString() }
-        : { code: errorCode },
+    log.error('[POST /generate-custom-application] Failed:', err.message);
+    res.status(500).json({
+      error: 'आवेदन पत्र जनरेट करने में त्रुटि। / Failed to generate application.',
+      detail: process.env.NODE_ENV === 'development' ? err.message : undefined,
     });
   }
 });

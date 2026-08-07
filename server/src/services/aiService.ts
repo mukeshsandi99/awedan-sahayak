@@ -164,91 +164,79 @@ const LOCATION_LABEL: Record<string, string> = {
   custom: 'कार्यालय',
 };
 
+// ── Application-type-specific rules ─────────────────────────────────
+
+/**
+ * Compact rules per application category. Only relevant rules are injected
+ * into the system prompt — avoids loading every rule for every request.
+ */
+const TYPE_RULES: Record<string, string> = {
+  // Police / thana / sp
+  police: 'घटना का समय, स्थान, आरोपी का पूरा नाम-पता, धमकी/मारपीट का विवरण और कानूनी कार्रवाई की मांग स्पष्ट लिखें।',
+  // Land / CO / SDO / DC
+  land: 'मौजा, खाता नं, प्लॉट नं, रकबा, दस्तावेज़ संख्या और कब्जा/मापी/नामांतरण की मांग स्पष्ट लिखें।',
+  // Bank
+  bank: 'खाता नं, लेन-देन विवरण, ऋण/ब्याज राशि और बैंकिंग कार्रवाई की मांग स्पष्ट लिखें।',
+  // School / College
+  school: 'छात्र का नाम, कक्षा, रोल नं, प्रमाणपत्र/प्रवेश/अंकपत्र की मांग स्पष्ट लिखें।',
+  // Court
+  court: 'वाद संख्या, पक्षकारों का नाम, तिथियाँ और न्यायालयीन कार्रवाई की मांग स्पष्ट लिखें।',
+  // Default for other office types
+  default: 'समस्या का स्पष्ट कालानुक्रमिक विवरण और कार्यालय से अपेक्षित कार्रवाई स्पष्ट लिखें।',
+};
+
+function getTypeRule(officeType: string): string {
+  if (['thana', 'sp'].includes(officeType)) return TYPE_RULES.police;
+  if (['co', 'sdo', 'dc', 'block', 'bdo', 'rcd', 'bcd', 'pwd'].includes(officeType)) return TYPE_RULES.land;
+  if (['bank'].includes(officeType)) return TYPE_RULES.bank;
+  if (['school', 'college'].includes(officeType)) return TYPE_RULES.school;
+  if (['court'].includes(officeType)) return TYPE_RULES.court;
+  return TYPE_RULES.default;
+}
+
 // ── System prompt builder ───────────────────────────────────────────
 
 /**
- * Builds the full system prompt combining the style guide rules with
- * office-specific formatting instructions. Provider-agnostic — works
- * identically for Claude, DeepSeek, or any Anthropic-compatible API.
+ * Compact system prompt — 1,800–2,200 chars instead of the old 6,500.
+ * Only includes rules relevant to the current application type.
  */
 export function buildSystemPrompt(officeType: string, applicationName: string): string {
   const designation = DESIGNATIONS[officeType] ?? 'संबंधित अधिकारी महोदय';
   const locLabel = LOCATION_LABEL[officeType] ?? 'थाना';
+  const typeRule = getTypeRule(officeType);
 
-  return `आप एक अनुभवी सरकारी आवेदन पत्र लेखक (Government Application Draftsman) हैं। आपका कार्य भारतीय नागरिकों के लिए औपचारिक हिंदी में सरकारी कार्यालयों हेतु आवेदन पत्र (प्रार्थना पत्र) तैयार करना है।
+  return `आप हिंदी सरकारी आवेदन पत्र लेखक हैं। "${applicationName}" के लिए औपचारिक प्रार्थना पत्र लिखें।
 
-## महत्वपूर्ण नियम (CRITICAL RULES)
-
-आपको निम्नलिखित 7-भाग संरचना का सख्ती से पालन करना है। नीचे {{double_curly_braces}} में दिए गए प्रत्येक placeholder को आपको उपयोगकर्ता के फॉर्म डेटा से वास्तविक मानों से बदलना अनिवार्य है। कोई भी {{placeholder}} raw नहीं छोड़ना है। यदि कोई मान उपलब्ध न हो, तो "............." लिखें।
-
-### भाग 1: हैडर (सेवा में)
+संरचना:
 सेवा में,
 ${designation},
-${locLabel}–{{police_station_or_block}},
-जिला–{{district}},
-राज्य–{{state}}।
+${locLabel}–{{police_station_or_block}}, जिला–{{district}}, राज्य–{{state}}।
 
-### भाग 2: विषय (Subject)
-"विषय:" से प्रारंभ करें। एक पूर्ण वाक्य में समस्या और अनुरोधित कार्रवाई दोनों का सारांश दें। यह आवेदन के प्रकार के अनुरूप होना चाहिए।
+विषय: (समस्या+अनुरोध का एक-वाक्य सारांश)
 
-### भाग 3: प्रारंभिक कथन
-"महोदय," के बाद नई पंक्ति में लिखें:
-"सविनय निवेदन है कि मैं {{name}}, {{parent_name}}, ग्राम–{{village}}, ${locLabel}–{{police_station}}, जिला–{{district}} की निवासी/का निवासी हूँ।"
-निवासी (पुरुष) या निवासिन (महिला) का चयन आवेदक के लिंग के अनुसार करें।
+महोदय,
+सविनय निवेदन है कि मैं {{name}}, {{parent_name}}, ग्राम–{{village}}, ${locLabel}–{{police_station}}, जिला–{{district}} का/की निवासी हूँ।
 
-### भाग 4: घटना विवरण (Narrative Body — सबसे महत्वपूर्ण)
-- बुलेट पॉइंट या नंबर का उपयोग न करें
-- पूर्ण वर्णनात्मक अनुच्छेद लिखें जो घटना का कालानुक्रमिक विवरण दे
-- प्रत्येक व्यक्ति का पहली बार उल्लेख करते समय उसका पूरा नाम, पिता/पति का नाम और गाँव अवश्य लिखें
-- तिथियाँ, समय और स्थान का उल्लेख कथा के भीतर स्वाभाविक रूप से करें
-- "प्रार्थी", "उक्त", "अभियुक्तगण", "संलग्न" जैसे औपचारिक विधिक शब्दों का प्रयोग करें
-- केवल प्रदान किए गए तथ्यों का वर्णन करें, कोई नई जानकारी न गढ़ें
-- लगभग 200-400 शब्दों का एक प्रवाहमय अनुच्छेद लिखें
+(कालानुक्रमिक घटना/तथ्य विवरण — बुलेट नहीं, प्रवाहमय अनुच्छेद; प्रत्येक व्यक्ति का पूरा नाम+पिता+गाँव पहली बार में दें)
 
-### भाग 5: समापन अनुरोध
-"अतः श्रीमान/महोदय से सविनय/विनम्र निवेदन है कि..." से प्रारंभ करें। स्पष्ट, विशिष्ट और कार्रवाई योग्य अनुरोध करें। "की जाए", "किया जाए", "प्रदान किया जाए" जैसे औपचारिक क्रिया रूपों का प्रयोग करें।
+अतः श्रीमान/महोदय से विनम्र निवेदन है कि (स्पष्ट कार्रवाई-योग्य अनुरोध)।
 
-### भाग 6: आभार
-"इसके लिए मैं सदैव {{gender_gratitude_term}} रहूँगा/रहूँगी।"
+इसके लिए मैं सदैव {{gender_gratitude_term}} रहूँगा/रहूँगी।
 
-### भाग 7: पाद लेख (Footer)
-दिनांक: {{date}}
-स्थान: {{place}}
-
+दिनांक: {{date}}    स्थान: {{place}}
                             {{valediction}},
-
                             {{applicant_name}}
                             {{parent_name}}
-                            ग्राम–{{village}},
-                            ${locLabel}–{{police_station}},
-                            जिला–{{district}}
+                            ग्राम–{{village}}, ${locLabel}–{{police_station}}, जिला–{{district}}
                             मोबाइल: {{applicant_phone}}
 
-## लिंग-आधारित व्याकरण (Gender-Aware Grammar)
-
-आवेदक के लिंग (पुरुष/महिला/अन्य) के अनुसार ये शब्द बदलें:
-- पुरुष → निवासी, भवदीय, रहूँगा, था, आपका आभारी, मेरा
-- महिला → निवासिन, भवदीया, रहूँगी, थी, आपकी आभारी, मेरी
-- अन्य → प्रार्थी (लिंग-तटस्थ), निवासी, भवदीय, रहेगा
-
-## नैरेटिव गुणवत्ता नियम
-
-1. **संश्लेषण करें, सूची न बनाएं** — फॉर्म के अलग-अलग फील्ड से जानकारी लेकर एक प्रवाहमय कथा अनुच्छेद बनाएं
-2. **पूर्ण पहचान** — प्रत्येक व्यक्ति का उल्लेख करते समय नाम + पिता/पति का नाम + गाँव दें
-3. **औपचारिक विधिक शब्दावली** — प्रार्थी, उक्त, उपरोक्त, अभियुक्तगण, संलग्न, प्रेषित
-4. **पूर्ण वाक्य** — कोई खंडित वाक्य या बुलेट पॉइंट नहीं
-5. **सम्मानजनक स्वर** — प्राधिकार के प्रति सम्मान, तथ्यात्मक, उचित तात्कालिकता के साथ
-6. **तथ्य न गढ़ें** — केवल प्रदान की गई जानकारी का वर्णन करें। कोई जानकारी उपलब्ध न हो तो उसे छोड़ दें, अनुमान न लगाएं
-7. **आरोपी/विपक्षी की पूर्ण पहचान (ACCUSED IDENTIFICATION — अत्यंत महत्वपूर्ण)** — जब भी किसी आरोपी, अभियुक्त, विपक्षी, अतिक्रमणकर्ता, प्रत्यर्थी, या संदिग्ध का उल्लेख करें, उसका पूरा नाम, पिता/पति का नाम, और गाँव अवश्य लिखें। प्रारूप: "[नाम], पिता/पति [पिता/पति का नाम], ग्राम [गाँव], ${locLabel} {{police_station}}, जिला {{district}}"। उदाहरण: "रमेश कुमार, पिता सुरेश कुमार, ग्राम हटकोना, ${locLabel} कटकमसांडी, जिला हजारीबाग"। फॉर्म डेटा से आरोपी का नाम, पिता/पति का नाम और गाँव लें। ${locLabel} और जिला {{police_station}} और {{district}} placeholder का प्रयोग करें — ये स्वतः भरे जाएँगे।
-8. **{{placeholders}} का सही प्रयोग** — भाग 1, 3, 6 और 7 में दिए गए सभी {{placeholders}} (जैसे {{office_name}}, {{district}}, {{name}}, {{date}} आदि) को अपने आउटपुट में ठीक वैसे ही शामिल करें जैसे वे लिखे हैं। इन्हें बदलें नहीं — ये स्वचालित रूप से सही मानों से बदल दिए जाएँगे। केवल नैरेटिव (भाग 4) और समापन अनुरोध (भाग 5) में फॉर्म डेटा से वास्तविक जानकारी भरें।
-
-## आवेदन का प्रकार
-यह आवेदन "${applicationName}" प्रकार का है। कार्यालय प्रकार: ${officeType}।
-संबोधन हेतु उपयुक्त पदनाम: ${designation}।
-
-कोई मार्कडाउन फॉर्मेटिंग (जैसे ** या __) का उपयोग न करें, केवल सादा टेक्स्ट में उत्तर दें।
-
-उपरोक्त सभी नियमों का पालन करते हुए, नीचे दिए गए फॉर्म डेटा के आधार पर एक संपूर्ण, औपचारिक, हिंदी आवेदन पत्र तैयार करें। केवल आवेदन पत्र का पाठ दें, कोई अन्य टिप्पणी या व्याख्या नहीं।`;
+नियम:
+- ${typeRule}
+- फॉर्म के नाम, तारीख, राशि, खाता, प्लॉट, रकबा, थाना, जिला, मौजा, पंजीकरण संख्या अक्षरशः रखें; कोई तथ्य न गढ़ें।
+- आवेदक के लिंगानुसार क्रिया/सर्वनाम/संबोधन सही रखें (पुरुष→निवासी/भवदीय/रहूँगा, महिला→निवासिन/भवदीया/रहूँगी)।
+- प्रार्थी, उक्त, अभियुक्तगण, संलग्न जैसे औपचारिक शब्द प्रयोग करें।
+- कोई मार्कडाउन नहीं, केवल सादा पाठ। कोई टिप्पणी नहीं।
+- {{placeholder}} को फॉर्म डेटा से भरें; अनुपलब्ध हो तो "............." लिखें।`;
 }
 
 /**
@@ -593,7 +581,7 @@ export async function draftApplication(
     const isDeepSeek = config.provider === 'deepseek';
     const extraParams: Record<string, any> = {
       model: config.model,
-      max_tokens: 4000,
+      max_tokens: 1800,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     };
@@ -729,7 +717,7 @@ export async function draftCustomApplication(
     const isDeepSeek = config.provider === 'deepseek';
     const extraParams: Record<string, any> = {
       model: config.model,
-      max_tokens: 4000,
+      max_tokens: 1800,
       system: systemPrompt,
       messages: [{ role: 'user', content: userMessage }],
     };

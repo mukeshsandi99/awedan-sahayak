@@ -24,6 +24,7 @@ import {
   finishTransaction,
   purchaseUpdatedListener,
   purchaseErrorListener,
+  getAvailablePurchases,
   PurchaseError,
   type Product,
   type Purchase,
@@ -33,6 +34,7 @@ import {
   setSubscriptionActive,
   addPaidCredits,
 } from './usageTracker';
+import { apiPost } from './apiClient';
 
 // ── Module-level state ────────────────────────────────────────────────
 
@@ -118,35 +120,44 @@ function setupPurchaseListeners(): void {
       }
 
       try {
-        // Validate receipt before trusting the purchase
-        const isValid = await validatePurchaseLocally(purchase);
-        if (!isValid) {
-          console.warn('[IAP] Listener: receipt validation FAILED for', purchase.productId);
-          return;
-        }
-
-        // ── Handle by product type ───────────────────────────────────
+        // Server-side verification for listener purchases (auto-renewals, etc.)
+        // RULE: Never acknowledge/finish an unverified purchase.
         if (purchase.productId === IAP_SKU_MONTHLY) {
-          // Subscription: new purchase OR auto-renewal
+          const verification = await verifyWithServer(purchase, 'subscription');
+
+          if (!verification?.valid || verification.entitlement !== 'active') {
+            console.warn('[IAP] Listener: server verification FAILED for', purchase.productId);
+            // Do NOT acknowledge — leave purchase pending
+            return;
+          }
+
+          if (!verification.expiryTime) {
+            console.warn('[IAP] Listener: server did not provide expiryTime — cannot activate.');
+            return;
+          }
+
+          // Grant entitlement FIRST, then acknowledge
+          const expiryDate = new Date(verification.expiryTime);
+          await setSubscriptionActive(purchase.productId, token, expiryDate.toISOString());
           await finishTransaction({ purchase, isConsumable: false });
-
-          const expiryDate = new Date();
-          expiryDate.setDate(expiryDate.getDate() + 31);
-          await setSubscriptionActive(
-            purchase.productId,
-            token,
-            expiryDate.toISOString(),
-          );
-
           if (token) processedTokens.add(token);
-          console.log('[IAP] ✅ Subscription activated/renewed via listener. Expires:', expiryDate.toISOString());
+          console.log('[IAP] ✅ Subscription renewed via listener (server-verified).');
         } else if (purchase.productId === IAP_SKU_SINGLE) {
-          // One-time consumable: grant credit
-          await finishTransaction({ purchase, isConsumable: true });
-          await addPaidCredits(1);
+          // One-time consumable via listener — use atomic server processing
+          const result2 = await apiPost('/api/billing/process-product', {
+            productId: purchase.productId,
+            purchaseToken: token,
+          });
 
+          if (!result2.ok || !(result2.data as any)?.processed) {
+            console.warn('[IAP] Listener: product processing FAILED — not granting credit.');
+            return;
+          }
+
+          await addPaidCredits(1);
+          await finishTransaction({ purchase, isConsumable: true }).catch(() => {});
           if (token) processedTokens.add(token);
-          console.log('[IAP] ✅ 1 credit granted via listener.');
+          console.log('[IAP] ✅ 1 credit granted via listener (server-processed).');
         } else {
           console.warn('[IAP] Listener: unrecognised productId:', purchase.productId);
         }
@@ -230,8 +241,14 @@ export async function getProductDetails(): Promise<Product[]> {
 
 /**
  * Initiate the monthly subscription purchase (₹100/month).
- * Returns true if the purchase completed successfully and was
- * acknowledged locally.
+ *
+ * FLOW (correct order):
+ *   Request purchase → Google Play returns purchase →
+ *   Server verify (Google Play Developer API) →
+ *   Only if PURCHASED + active: grant entitlement →
+ *   Then (and only then) acknowledge/finish transaction.
+ *
+ * NEVER acknowledges or finishes a purchase that hasn't been verified.
  */
 export async function purchaseMonthlySubscription(): Promise<boolean> {
   if (!iapReady) {
@@ -245,7 +262,6 @@ export async function purchaseMonthlySubscription(): Promise<boolean> {
       request: { google: { skus: [IAP_SKU_MONTHLY] } },
       type: 'subs',
     });
-    // result can be Purchase | Purchase[] | null — normalise to single Purchase
     const purchase: Purchase | null = Array.isArray(result) ? result[0] ?? null : (result ?? null);
 
     if (!purchase) {
@@ -255,36 +271,47 @@ export async function purchaseMonthlySubscription(): Promise<boolean> {
 
     console.log('[IAP] Subscription purchase received:', purchase.productId);
 
-    // Client-side receipt validation
-    const isValid = await validatePurchaseLocally(purchase);
-    if (!isValid) {
-      console.warn('[IAP] Receipt validation failed — not acknowledging.');
+    // STEP 1: Verify with server (Google Play Developer API).
+    //         Do NOT acknowledge or finish until verification passes.
+    const verification = await verifyWithServer(purchase, 'subscription');
+
+    if (!verification) {
+      // Server unreachable — do NOT grant premium, do NOT finish the purchase.
+      // The purchase stays in pending state. On next app launch/restore, retry.
+      console.warn('[IAP] ⚠️  Server unreachable — subscription NOT activated. Purchase remains pending.');
+      throw new Error('VERIFICATION_FAILED');
+    }
+
+    if (!verification.valid) {
+      console.warn('[IAP] ❌ Server verification failed:', verification.reason);
+      // Do NOT acknowledge — let Google Play handle (user may be refunded).
       return false;
     }
 
-    // Acknowledge with Google Play
-    await finishTransaction({
-      purchase,
-      isConsumable: false, // subscriptions are NOT consumable
-    });
-    console.log('[IAP] Subscription transaction finished (acknowledged).');
+    if (verification.entitlement !== 'active') {
+      console.warn(`[IAP] ❌ Subscription state is "${verification.entitlement}" — not granting premium.`);
+      // Still acknowledge so Google Play doesn't auto-refund
+      await finishTransaction({ purchase, isConsumable: false }).catch(() => {});
+      return false;
+    }
 
-    // Update local state: mark subscription as active
-    // Subscription expiry: Google Play subscriptions auto-renew,
-    // we set a 31-day window as fallback expiry.
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 31);
+    // STEP 2: Verification passed + active → grant entitlement
     const token = (purchase as any).purchaseToken ?? (purchase as any).transactionReceipt ?? '';
-    await setSubscriptionActive(
-      purchase.productId,
-      token,
-      expiryDate.toISOString(),
-    );
+    if (!verification.expiryTime) {
+      // Server MUST provide expiry time — never make up a fallback
+      console.warn('[IAP] ⚠️  Server did not provide expiryTime — cannot activate safely.');
+      return false;
+    }
 
-    // Mark as processed so the listener doesn't double-handle
+    const expiryDate = new Date(verification.expiryTime);
+    await setSubscriptionActive(purchase.productId, token, expiryDate.toISOString());
+
+    // STEP 3: NOW acknowledge with Google Play
+    await finishTransaction({ purchase, isConsumable: false });
+    console.log('[IAP] Subscription acknowledged after successful verification.');
+
     if (token) processedTokens.add(token);
-
-    console.log('[IAP] ✅ Subscription activated locally.');
+    console.log('[IAP] ✅ Subscription activated (server-verified). Expires:', expiryDate.toISOString());
     return true;
   } catch (err: any) {
     return handlePurchaseError(err, 'subscription');
@@ -293,7 +320,13 @@ export async function purchaseMonthlySubscription(): Promise<boolean> {
 
 /**
  * Initiate the one-time ₹10 credit purchase.
- * Returns true if the purchase completed successfully and credit was granted.
+ *
+ * FLOW (correct order):
+ *   Request purchase → Google Play returns purchase →
+ *   Server verify + atomically process (verify + mark credited + consume) →
+ *   Only if server says processed=true: grant 1 local credit.
+ *
+ * NEVER grants credit on an unverified or server-unreachable purchase.
  */
 export async function purchaseSingleApplication(): Promise<boolean> {
   if (!iapReady) {
@@ -307,7 +340,6 @@ export async function purchaseSingleApplication(): Promise<boolean> {
       request: { google: { skus: [IAP_SKU_SINGLE] } },
       type: 'in-app',
     });
-    // result can be Purchase | Purchase[] | null — normalise to single Purchase
     const purchase: Purchase | null = Array.isArray(result) ? result[0] ?? null : (result ?? null);
 
     if (!purchase) {
@@ -316,57 +348,198 @@ export async function purchaseSingleApplication(): Promise<boolean> {
     }
 
     console.log('[IAP] One-time purchase received:', purchase.productId);
+    const token = (purchase as any).purchaseToken ?? (purchase as any).transactionReceipt ?? '';
 
-    // Client-side receipt validation
-    const isValid = await validatePurchaseLocally(purchase);
-    if (!isValid) {
-      console.warn('[IAP] Receipt validation failed — not acknowledging.');
+    // STEP 1: Atomic server-side processing (verify + credit + consume in one call)
+    const result2 = await apiPost('/api/billing/process-product', {
+      productId: purchase.productId,
+      purchaseToken: token,
+    });
+
+    if (!result2.ok) {
+      console.warn('[IAP] Server process-product failed:', result2.error);
+      // Do NOT finish/consume locally. Purchase remains pending.
       return false;
     }
 
-    // Acknowledge AND consume with Google Play (consumable product)
-    await finishTransaction({
-      purchase,
-      isConsumable: true, // consumable — user can buy again
-    });
-    console.log('[IAP] One-time purchase transaction finished (consumed).');
+    const response = result2.data as any;
 
-    // Grant 1 credit locally
+    if (!response?.processed) {
+      console.warn('[IAP] Server did not process purchase:', response?.reason);
+      return false;
+    }
+
+    // STEP 2: Server confirmed atomic processing — now grant local credit
     await addPaidCredits(1);
 
-    // Mark as processed so the listener doesn't double-handle
-    const token = (purchase as any).purchaseToken ?? (purchase as any).transactionReceipt ?? '';
+    // STEP 3: Finalize on-device (server already consumed via Google API)
+    await finishTransaction({ purchase, isConsumable: true }).catch(() => {});
     if (token) processedTokens.add(token);
 
-    console.log('[IAP] ✅ 1 credit granted to user.');
-
+    console.log('[IAP] ✅ 1 credit granted (server-verified + atomically processed).');
     return true;
   } catch (err: any) {
     return handlePurchaseError(err, 'one-time');
   }
 }
 
-// ── Receipt validation ────────────────────────────────────────────────
+// ── Server-side receipt verification ────────────────────────────────────
 
 /**
- * Client-side receipt validation stub.
+ * Verifies a purchase token with our backend, which calls the
+ * Google Play Developer API. This is the AUTHORITATIVE check —
+ * local state is never trusted alone.
  *
- * IMPORTANT: react-native-iap v15 removed the local `validateReceiptAndroid`
- * function. The replacement `validateReceipt` requires a Google OAuth2
- * `accessToken` for server-side validation against the Google Play Developer API.
- *
- * TODO (production): Integrate server-side verification via your backend
- * using the Google Play Developer API. Until then, we accept all purchases
- * (a determined attacker can bypass this — same as the pre-v15 behavior).
- *
- * @returns always true (stub)
+ * @returns verification result from the server, or null if unreachable.
  */
-async function validatePurchaseLocally(_purchase: Purchase): Promise<boolean> {
-  // Server-side verification not yet implemented — accept all purchases.
-  // The previous implementation (validateReceiptAndroid) also returned true
-  // on any error, so this preserves existing behavior.
-  console.log('[IAP] Local receipt validation skipped (server-side verification TODO).');
-  return true;
+async function verifyWithServer(
+  purchase: Purchase,
+  type: 'subscription' | 'product',
+): Promise<{ valid: boolean; reason?: string; entitlement?: string; expiryTime?: string | null; autoRenewing?: boolean; alreadyCredited?: boolean } | null> {
+  try {
+    const token =
+      (purchase as any).purchaseToken ??
+      (purchase as any).transactionReceipt ??
+      '';
+
+    if (!token) {
+      console.warn('[IAP] No purchaseToken found — cannot verify.');
+      return null;
+    }
+
+    const endpoint =
+      type === 'subscription'
+        ? '/api/billing/verify-subscription'
+        : '/api/billing/verify-product';
+
+    const result = await apiPost(endpoint, {
+      productId: purchase.productId,
+      purchaseToken: token,
+    });
+
+    if (!result.ok) {
+      console.warn(`[IAP] Server verification HTTP ${result.status}:`, result.error);
+      return null; // Server unreachable — caller handles gracefully
+    }
+
+    return result.data as any;
+  } catch (err: any) {
+    console.warn('[IAP] Server verification network error:', err?.message);
+    return null; // Network error — caller handles gracefully
+  }
+}
+
+/**
+ * ⚠️ DELIBERATELY REMOVED — The old `validatePurchaseLocally` stub
+ * that always returned true. All purchases MUST be verified via the
+ * backend Google Play Developer API integration.
+ *
+ * This function no longer exists. Call verifyWithServer() instead.
+ */
+
+// ── Restore Purchases ────────────────────────────────────────────────────
+
+export interface RestoreResult {
+  success: boolean;
+  subscriptionRestored: boolean;
+  message: string;
+}
+
+/**
+ * Restores previously purchased subscriptions from Google Play.
+ * Verifies EACH token with the backend. Only active subscriptions
+ * are restored; expired/revoked ones are ignored. Consumable purchases
+ * are NEVER re-credited.
+ */
+export async function restorePurchases(): Promise<RestoreResult> {
+  if (!iapReady) {
+    return {
+      success: false,
+      subscriptionRestored: false,
+      message:
+        'Google Play बिलिंग उपलब्ध नहीं है। कृपया Google Play Store ऐप खोलें और साइन इन करें।\n\n' +
+        'Google Play Billing is not available. Please open the Play Store app and sign in.',
+    };
+  }
+
+  try {
+    console.log('[IAP] Fetching available purchases...');
+    const purchases = await getAvailablePurchases();
+
+    if (!purchases || purchases.length === 0) {
+      console.log('[IAP] No available purchases to restore.');
+      return {
+        success: true,
+        subscriptionRestored: false,
+        message:
+          'कोई पिछली खरीदारी नहीं मिली।\n\n' +
+          'No previous purchases found to restore.',
+      };
+    }
+
+    // Filter subscription purchases only (never restore consumables)
+    const subPurchases = purchases.filter(
+      (p) => p.productId === IAP_SKU_MONTHLY,
+    );
+
+    if (subPurchases.length === 0) {
+      return {
+        success: true,
+        subscriptionRestored: false,
+        message: 'कोई सक्रिय सदस्यता नहीं मिली।\n\nNo active subscription found.',
+      };
+    }
+
+    // Verify each subscription token with the server
+    let restored = false;
+    for (const purchase of subPurchases) {
+      try {
+        const verification = await verifyWithServer(purchase, 'subscription');
+
+        if (verification?.valid && verification.entitlement !== 'active') {
+          console.log('[IAP] Restore: subscription is', verification.entitlement, '— skipping.');
+          continue;
+        }
+
+        if (verification?.valid && verification.entitlement === 'active') {
+          const token =
+            (purchase as any).purchaseToken ??
+            (purchase as any).transactionReceipt ??
+            '';
+          const expiryDate = verification.expiryTime
+            ? new Date(verification.expiryTime)
+            : new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
+
+          await setSubscriptionActive(purchase.productId, token, expiryDate.toISOString());
+          if (token) processedTokens.add(token);
+          restored = true;
+          console.log('[IAP] ✅ Subscription restored. Expires:', expiryDate.toISOString());
+        }
+      } catch (err: any) {
+        console.warn('[IAP] Restore: failed to verify one purchase:', err?.message);
+        // Continue with other purchases
+      }
+    }
+
+    return {
+      success: true,
+      subscriptionRestored: restored,
+      message: restored
+        ? '✅ आपकी सदस्यता पुनर्स्थापित कर दी गई है।\n\nYour subscription has been restored.'
+        : 'कोई सक्रिय सदस्यता नहीं मिली। यदि आपने हाल ही में खरीदारी की है तो कृपया कुछ समय बाद प्रयास करें।\n\nNo active subscription found. If you recently subscribed, please try again shortly.',
+    };
+  } catch (err: any) {
+    console.warn('[IAP] Restore purchases failed:', err?.message);
+    return {
+      success: false,
+      subscriptionRestored: false,
+      message:
+        'खरीदारी पुनर्स्थापित करने में त्रुटि।\n' +
+        'कृपया इंटरनेट कनेक्शन जाँचें और Google Play Store में साइन इन रहें।\n\n' +
+        'Failed to restore purchases. Please check your internet connection\n' +
+        'and ensure you are signed into the Google Play Store.',
+    };
+  }
 }
 
 // ── Error handling ────────────────────────────────────────────────────
@@ -380,6 +553,23 @@ const IAP_ERROR_MESSAGES: Record<string, string> = {
   E_DEVELOPER_ERROR: 'भुगतान सेटअप में त्रुटि। कृपया बाद में प्रयास करें।\n(Payment setup error.)',
   E_BILLING_UNAVAILABLE: 'Google Play बिलिंग उपलब्ध नहीं है।\n(Billing unavailable.)',
   E_ITEM_ALREADY_OWNED: 'आप पहले से ही इस उत्पाद के मालिक हैं।\n(You already own this product.)',
+  VERIFICATION_FAILED:
+    'खरीदारी सत्यापित नहीं हो सकी। कृपया इंटरनेट जाँचें और पुनः प्रयास करें।\n' +
+    'Purchase verification failed. Please check your internet and try again.',
+  TOKEN_REPLAY:
+    'यह खरीदारी पहले ही उपयोग की जा चुकी है।\n' +
+    'This purchase has already been applied.',
+  SUBSCRIPTION_EXPIRED:
+    'आपकी सदस्यता समाप्त हो चुकी है। कृपया नई सदस्यता लें।\n' +
+    'Your subscription has expired. Please subscribe again.',
+  SUBSCRIPTION_REVOKED:
+    'आपकी सदस्यता रद्द कर दी गई है।\n' +
+    'Your subscription has been revoked.',
+  RESTORE_NOT_FOUND:
+    'कोई पिछली खरीदारी नहीं मिली।\nNo previous purchases found.',
+  SERVER_UNAVAILABLE:
+    'सर्वर अनुपलब्ध है। कृपया बाद में पुनः प्रयास करें।\n' +
+    'Server unavailable. Please try again later.',
 };
 
 /**

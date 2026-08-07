@@ -16,6 +16,9 @@ export const AIConfig = {
   get maxRetries() { return parseInt(process.env.AI_MAX_RETRIES ?? '2', 10); },
   get retryBaseDelayMs() { return parseInt(process.env.AI_RETRY_BASE_DELAY_MS ?? '800', 10); },
   get retryMaxDelayMs() { return parseInt(process.env.AI_RETRY_MAX_DELAY_MS ?? '5000', 10); },
+  // 429 rate-limit backoff is longer — provider needs time to reset the window
+  get rateLimitBaseDelayMs() { return parseInt(process.env.AI_RATELIMIT_BASE_DELAY_MS ?? '5000', 10); },
+  get rateLimitMaxDelayMs() { return parseInt(process.env.AI_RATELIMIT_MAX_DELAY_MS ?? '20000', 10); },
 
   // ── Timeouts ─────────────────────────────────────────────────────
   get requestTimeoutMs() { return parseInt(process.env.AI_REQUEST_TIMEOUT_MS ?? '45000', 10); },

@@ -29,6 +29,8 @@ services:
         sync: false
 
       # ── Server ───────────────────────────────────────────────────────
+      - key: APP_API_SECRET
+        sync: false                            # shared secret matching mobile app X-App-Token
       - key: NODE_ENV
         value: production
       - key: PORT

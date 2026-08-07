@@ -3,15 +3,16 @@
  *
  * Manages the monetization usage counters stored in local SQLite
  * (app_metadata key-value table). All state is device-local —
- * server-side verification is a future enhancement.
+ * server-side verification is the authoritative source.
  *
  * Keys tracked:
- *   free_applications_used   — count of free tier applications used (0–5)
- *   paid_credits             — remaining one-time purchased credits
- *   subscription_status      — 'active' | 'expired' | 'none'
- *   subscription_product_id  — Play Store product ID of active sub
- *   subscription_purchase_token — Play Store purchase token
- *   subscription_expiry      — ISO date string when sub expires
+ *   free_applications_used      — count of free tier applications used (0–5)
+ *   paid_credits                 — remaining one-time purchased credits
+ *   subscription_status          — 'active' | 'expired' | 'none'
+ *   subscription_product_id      — Play Store product ID of active sub
+ *   subscription_purchase_token  — Play Store purchase token
+ *   subscription_expiry          — ISO date string when sub expires
+ *   subscription_last_verified_at — ISO timestamp of last server verification
  */
 
 import {
@@ -21,6 +22,14 @@ import {
   setMetadataInt,
 } from '../database/db';
 import type { SubscriptionStatus } from '../types/database';
+
+// ── Configuration (env-overridable via server) ───────────────────────────
+
+/** Max hours before server re-verification is required. */
+const VERIFY_CACHE_HOURS = 12;
+
+/** Max hours of offline grace before premium is disabled. */
+const OFFLINE_GRACE_HOURS = 48;
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -35,6 +44,7 @@ const KEY_SUB_STATUS = 'subscription_status';
 const KEY_SUB_PRODUCT = 'subscription_product_id';
 const KEY_SUB_TOKEN = 'subscription_purchase_token';
 const KEY_SUB_EXPIRY = 'subscription_expiry';
+const KEY_SUB_LAST_VERIFIED = 'subscription_last_verified_at';
 
 // ── Free usage ────────────────────────────────────────────────────────
 
@@ -104,6 +114,7 @@ export async function setSubscriptionActive(
   await setMetadata(KEY_SUB_PRODUCT, productId);
   await setMetadata(KEY_SUB_TOKEN, purchaseToken);
   await setMetadata(KEY_SUB_EXPIRY, expiryDate);
+  await setMetadata(KEY_SUB_LAST_VERIFIED, new Date().toISOString());
 }
 
 /** Mark subscription as expired (called when expiry date passes or renewal fails). */
@@ -118,6 +129,29 @@ export async function getSubscriptionPurchaseToken(): Promise<string | null> {
   const status = await getSubscriptionStatus();
   if (status !== 'active') return null;
   return getMetadata(KEY_SUB_TOKEN);
+}
+
+// ── Verification cache ──────────────────────────────────────────────────
+
+/** Record that we just verified the subscription with the server. */
+export async function setSubscriptionVerified(): Promise<void> {
+  await setMetadata(KEY_SUB_LAST_VERIFIED, new Date().toISOString());
+}
+
+/** Check if the subscription cache needs re-verification. */
+export async function isVerificationStale(): Promise<boolean> {
+  const lastVerified = await getMetadata(KEY_SUB_LAST_VERIFIED);
+  if (!lastVerified) return true; // Never verified — must verify
+  const elapsed = Date.now() - new Date(lastVerified).getTime();
+  return elapsed > VERIFY_CACHE_HOURS * 60 * 60 * 1000;
+}
+
+/** Check if we're within the offline grace period. */
+export async function isWithinOfflineGrace(): Promise<boolean> {
+  const lastVerified = await getMetadata(KEY_SUB_LAST_VERIFIED);
+  if (!lastVerified) return false;
+  const elapsed = Date.now() - new Date(lastVerified).getTime();
+  return elapsed <= OFFLINE_GRACE_HOURS * 60 * 60 * 1000;
 }
 
 // ── Monetization gate ─────────────────────────────────────────────────

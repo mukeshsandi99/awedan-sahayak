@@ -19,6 +19,7 @@ import {
   SubscriptionStatus,
 } from '../types/database';
 import { OFFICE_SEEDS, APPLICATION_TYPE_SEEDS } from './seed';
+import { NEW_TEMPLATES } from './seed-expansion';
 
 // ── Database handle ─────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ export async function initDatabase(): Promise<void> {
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS offices (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
-      type           TEXT    NOT NULL CHECK(type IN ('thana','block','bdo','co','sdo','sp','dc','court','bank','college','school','pwd','rcd','bcd')),
+      type           TEXT    NOT NULL CHECK(type IN ('thana','block','bdo','co','sdo','sp','dc','court','bank','college','school','pwd','rcd','bcd','transport')),
       name_hindi     TEXT    NOT NULL,
       name_english   TEXT    NOT NULL,
       district       TEXT,
@@ -96,7 +97,7 @@ export async function initDatabase(): Promise<void> {
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS application_types (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      office_type               TEXT    NOT NULL CHECK(office_type IN ('thana','block','bdo','co','sdo','sp','dc','court','bank','college','school','pwd','rcd','bcd')),
+      office_type               TEXT    NOT NULL CHECK(office_type IN ('thana','block','bdo','co','sdo','sp','dc','court','bank','college','school','pwd','rcd','bcd','transport')),
       name_hindi                TEXT    NOT NULL,
       name_english              TEXT    NOT NULL,
       keywords                  TEXT,     -- JSON array
@@ -165,6 +166,12 @@ export async function initDatabase(): Promise<void> {
 
   // Migration: add custom_office_name column for custom/blank applications
   await migrateCustomOfficeName();
+
+  // Migration: template favorites, recents, and versioning
+  await migrateTemplateTables();
+
+  // Migration: add transport office type (15th office type)
+  await migrateTransportOfficeType();
 
   // Create indexes for common queries
   await db.execAsync(`CREATE INDEX IF NOT EXISTS idx_offices_type ON offices(type);`);
@@ -525,6 +532,28 @@ async function seedIfEmpty(): Promise<void> {
   if (appTypeAdded > 0) {
     console.log(`[DB] Seeded ${appTypeAdded} new application type(s) (${APPLICATION_TYPE_SEEDS.length} total in seed).`);
   }
+
+  // ── Seed expansion templates (idempotent) ──────────────────────
+  let expansionAdded = 0;
+  for (const at of NEW_TEMPLATES) {
+    const existing = await database.getFirstAsync<{ cnt: number }>(
+      'SELECT COUNT(*) AS cnt FROM application_types WHERE office_type = ? AND name_hindi = ?',
+      at.office_type, at.name_hindi,
+    );
+    if (!existing || existing.cnt === 0) {
+      await database.runAsync(
+        `INSERT INTO application_types (office_type, name_hindi, name_english, keywords, required_fields, prompt_template, requires_legal_disclaimer, disclaimer_text)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+        at.office_type, at.name_hindi, at.name_english,
+        at.keywords, at.required_fields, at.prompt_template,
+        at.requires_legal_disclaimer, at.disclaimer_text,
+      );
+      expansionAdded++;
+    }
+  }
+  if (expansionAdded > 0) {
+    console.log(`[DB] ✅ Seeded ${expansionAdded} new template(s) from expansion (${NEW_TEMPLATES.length} total).`);
+  }
 }
 
 /**
@@ -737,7 +766,7 @@ export function parseAddressComponents(rawAddress: string): ParsedAddress {
 /** Fetch the user profile (app expects a single local user). */
 export async function getUserProfile(): Promise<UserProfile | null> {
   const row = await getDb().getFirstAsync<UserProfile>('SELECT * FROM user_profile LIMIT 1;');
-  if (__DEV__) { console.log('[DB] getUserProfile() returned:', JSON.stringify(row, null, 2)); }
+  if (__DEV__) { console.log('[DB] getUserProfile() returned:', row ? `profile id=${row.id}, name=${!!row.name}, address=${!!row.address}` : 'null'); }
   return row;
 }
 
@@ -990,6 +1019,260 @@ export async function cancelReminder(id: number): Promise<boolean> {
     id,
   );
   return (result.changes ?? 0) > 0;
+}
+
+// ── Schema migrations tracking ────────────────────────────────────────
+
+async function ensureSchemaMigrationsTable(): Promise<void> {
+  const database = getDb();
+  await database.execAsync(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      migration_key TEXT PRIMARY KEY,
+      applied_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+}
+
+async function hasMigration(key: string): Promise<boolean> {
+  const row = await getDb().getFirstAsync<{ cnt: number }>(
+    'SELECT COUNT(*) AS cnt FROM schema_migrations WHERE migration_key = ?;', key,
+  );
+  return (row?.cnt ?? 0) > 0;
+}
+
+async function recordMigration(key: string): Promise<void> {
+  await getDb().runAsync(
+    'INSERT OR REPLACE INTO schema_migrations (migration_key, applied_at) VALUES (?, datetime(\'now\'));',
+    key,
+  );
+}
+
+// ── Transport office migration ────────────────────────────────────────
+
+const MIGRATION_KEY = 'add_transport_office_type_v1';
+
+/** Exported for testing. Production flow uses initDatabase(). */
+export async function migrateTransportOfficeType(): Promise<void> {
+  await ensureSchemaMigrationsTable();
+
+  const database = getDb();
+
+  // ── Schema detection: check if tables already allow transport ──────
+  const officeSchema = await database.getFirstAsync<{ sql: string }>(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='offices';`,
+  );
+  const alreadyHasTransport =
+    officeSchema?.sql?.includes('transport') ?? false;
+
+  if (alreadyHasTransport && await hasMigration(MIGRATION_KEY)) {
+    console.log('[DB] Transport office migration already applied — skipping.');
+    return;
+  }
+
+  if (alreadyHasTransport && !(await hasMigration(MIGRATION_KEY))) {
+    console.log('[DB] Schema already has transport — recording migration record only.');
+    await recordMigration(MIGRATION_KEY);
+    return;
+  }
+
+  console.log('[DB] ⚠️  Running transport office migration (14 → 15 types)...');
+
+  // ── Clean up leftover _new tables from interrupted prior attempts ──
+  const newTables = await database.getAllAsync<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND (name='offices_new' OR name='application_types_new');`,
+  );
+  for (const t of newTables) {
+    console.log(`[DB] Cleaning up orphan table: ${t.name}`);
+    await database.execAsync(`DROP TABLE IF EXISTS ${t.name};`);
+  }
+
+  try {
+    // ── Begin atomic transaction ────────────────────────────────────
+    await database.execAsync('PRAGMA foreign_keys = OFF;');
+    await database.execAsync('BEGIN TRANSACTION;');
+
+    const newTypes15 = '(' + [
+      'thana','block','bdo','co','sdo','sp','dc','court','bank',
+      'college','school','pwd','rcd','bcd','transport'
+    ].map(t => `'${t}'`).join(',') + ')';
+
+    // ── Step 1: Rebuild offices table ──────────────────────────────
+    const beforeCount = await database.getFirstAsync<{ cnt: number }>(
+      'SELECT COUNT(*) AS cnt FROM offices;',
+    );
+    console.log(`[DB] Offices before: ${beforeCount?.cnt ?? '?'} rows`);
+
+    await database.execAsync(
+      `CREATE TABLE offices_new (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL CHECK(type IN ${newTypes15}), name_hindi TEXT NOT NULL, name_english TEXT NOT NULL, district TEXT, block TEXT, full_address TEXT, phone_number TEXT, latitude REAL, longitude REAL, working_hours TEXT, landmark TEXT, is_verified INTEGER NOT NULL DEFAULT 0);`,
+    );
+    await database.execAsync('INSERT INTO offices_new SELECT * FROM offices;');
+    const afterCount = await database.getFirstAsync<{ cnt: number }>(
+      'SELECT COUNT(*) AS cnt FROM offices_new;',
+    );
+    if (beforeCount?.cnt !== afterCount?.cnt) {
+      throw new Error(`Office row count mismatch: ${beforeCount?.cnt} vs ${afterCount?.cnt}`);
+    }
+    await database.execAsync('DROP TABLE offices;');
+    await database.execAsync('ALTER TABLE offices_new RENAME TO offices;');
+
+    // ── Step 2: Rebuild application_types table ────────────────────
+    const appBeforeCount = await database.getFirstAsync<{ cnt: number }>(
+      'SELECT COUNT(*) AS cnt FROM application_types;',
+    );
+    await database.execAsync(
+      `CREATE TABLE application_types_new (id INTEGER PRIMARY KEY AUTOINCREMENT, office_type TEXT NOT NULL CHECK(office_type IN ${newTypes15}), name_hindi TEXT NOT NULL, name_english TEXT NOT NULL, keywords TEXT, required_fields TEXT, prompt_template TEXT, requires_legal_disclaimer INTEGER NOT NULL DEFAULT 0, disclaimer_text TEXT, version INTEGER NOT NULL DEFAULT 1, is_premium INTEGER NOT NULL DEFAULT 0, search_weight REAL NOT NULL DEFAULT 1.0, category TEXT);`,
+    );
+    await database.execAsync(
+      'INSERT INTO application_types_new(id, office_type, name_hindi, name_english, keywords, required_fields, prompt_template, requires_legal_disclaimer, disclaimer_text, version, is_premium, search_weight, category) ' +
+      'SELECT id, office_type, name_hindi, name_english, keywords, required_fields, prompt_template, requires_legal_disclaimer, disclaimer_text, ' +
+      'COALESCE(version, 1), COALESCE(is_premium, 0), COALESCE(search_weight, 1.0), category FROM application_types;',
+    );
+    const appAfterCount = await database.getFirstAsync<{ cnt: number }>(
+      'SELECT COUNT(*) AS cnt FROM application_types_new;',
+    );
+    if (appBeforeCount?.cnt !== appAfterCount?.cnt) {
+      throw new Error(`Application type row count mismatch: ${appBeforeCount?.cnt} vs ${appAfterCount?.cnt}`);
+    }
+    await database.execAsync('DROP TABLE application_types;');
+    await database.execAsync('ALTER TABLE application_types_new RENAME TO application_types;');
+
+    // Fix sequence
+    const maxId = await database.getFirstAsync<{ mx: number }>(
+      'SELECT MAX(id) AS mx FROM application_types;',
+    );
+    if (maxId?.mx) {
+      await database.execAsync(
+        `UPDATE sqlite_sequence SET seq = ${maxId.mx} WHERE name = 'application_types';`,
+      );
+    }
+
+    // ── Step 3: Recreate indexes ───────────────────────────────────
+    await database.execAsync('CREATE INDEX IF NOT EXISTS idx_offices_type ON offices(type);');
+    await database.execAsync('CREATE INDEX IF NOT EXISTS idx_app_types_office ON application_types(office_type);');
+
+    // ── Step 4: FK check MUST pass ──────────────────────────────────
+    const fkErrors = await database.getAllAsync<{ tbl: string; id: number; parent: string; fkid: number }>(
+      'PRAGMA foreign_key_check;',
+    );
+    if (fkErrors.length > 0) {
+      const details = fkErrors.map(e => `${e.tbl}(${e.id})→${e.parent}(${e.fkid})`).join('; ');
+      throw new Error(`Foreign key violations: ${details}`);
+    }
+
+    // ── Step 5: Record migration ATOMICALLY inside transaction ──────
+    await database.runAsync(
+      `INSERT OR REPLACE INTO schema_migrations (migration_key, applied_at) VALUES (?, datetime('now'));`,
+      MIGRATION_KEY,
+    );
+
+    await database.execAsync('COMMIT;');
+    await database.execAsync('PRAGMA foreign_keys = ON;');
+    console.log('[DB] ✅ Transport office migration complete. 14 → 15 types, all data preserved.');
+  } catch (err: any) {
+    console.error('[DB] ❌ Transport office migration failed, rolling back:', err?.message);
+    try { await database.execAsync('ROLLBACK;'); } catch {}
+    try { await database.execAsync('PRAGMA foreign_keys = ON;'); } catch {}
+    throw err;
+  }
+}
+
+// ── Template tables migration ──────────────────────────────────────────
+
+async function migrateTemplateTables(): Promise<void> {
+  const database = getDb();
+  console.log('[DB] Checking for template metadata tables...');
+  try {
+    // Favorites
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS template_favorites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL UNIQUE,
+        added_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (template_id) REFERENCES application_types(id) ON DELETE CASCADE
+      );
+    `);
+    // Recents
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS template_recents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        opened_at TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (template_id) REFERENCES application_types(id) ON DELETE CASCADE
+      );
+    `);
+    await database.execAsync(`CREATE INDEX IF NOT EXISTS idx_recents_date ON template_recents(opened_at DESC);`);
+    // Template metadata (versioning, premium status)
+    try { await database.execAsync(`ALTER TABLE application_types ADD COLUMN version INTEGER NOT NULL DEFAULT 1;`); } catch {}
+    try { await database.execAsync(`ALTER TABLE application_types ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0;`); } catch {}
+    try { await database.execAsync(`ALTER TABLE application_types ADD COLUMN search_weight REAL NOT NULL DEFAULT 1.0;`); } catch {}
+    try { await database.execAsync(`ALTER TABLE application_types ADD COLUMN category TEXT;`); } catch {}
+    console.log('[DB] ✅ Template metadata tables ready.');
+  } catch (err: any) {
+    console.warn('[DB] Template tables migration warning:', err?.message);
+  }
+}
+
+// ── Template Favorites CRUD ────────────────────────────────────────────
+
+export async function getFavoriteTemplateIds(): Promise<number[]> {
+  const rows = await getDb().getAllAsync<{ template_id: number }>('SELECT template_id FROM template_favorites ORDER BY added_at DESC;');
+  return rows.map((r) => r.template_id);
+}
+
+export async function isFavoriteTemplate(templateId: number): Promise<boolean> {
+  const row = await getDb().getFirstAsync<{ cnt: number }>('SELECT COUNT(*) as cnt FROM template_favorites WHERE template_id = ?;', templateId);
+  return (row?.cnt ?? 0) > 0;
+}
+
+export async function addFavoriteTemplate(templateId: number): Promise<void> {
+  await getDb().runAsync('INSERT OR IGNORE INTO template_favorites (template_id) VALUES (?);', templateId);
+}
+
+export async function removeFavoriteTemplate(templateId: number): Promise<void> {
+  await getDb().runAsync('DELETE FROM template_favorites WHERE template_id = ?;', templateId);
+}
+
+// ── Template Recents CRUD ──────────────────────────────────────────────
+
+const MAX_RECENTS = 20;
+
+export async function getRecentTemplateIds(limit: number = 10): Promise<number[]> {
+  const rows = await getDb().getAllAsync<{ template_id: number }>(
+    'SELECT DISTINCT template_id FROM template_recents ORDER BY MAX(opened_at) DESC LIMIT ?;', limit,
+  );
+  return rows.map((r) => r.template_id);
+}
+
+export async function recordTemplateOpen(templateId: number): Promise<void> {
+  await getDb().runAsync('INSERT INTO template_recents (template_id) VALUES (?);', templateId);
+  // Cleanup old entries beyond MAX_RECENTS
+  await getDb().runAsync(
+    `DELETE FROM template_recents WHERE id NOT IN (SELECT id FROM template_recents ORDER BY opened_at DESC LIMIT ?);`,
+    MAX_RECENTS,
+  );
+}
+
+// ── Template Search ────────────────────────────────────────────────────
+
+export async function searchTemplatesFTS(query: string): Promise<ApplicationType[]> {
+  const words = query.trim().split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return [];
+  // Build LIKE clauses for each word
+  const clauses = words.map(() => '(name_hindi LIKE ? OR name_english LIKE ? OR keywords LIKE ? OR IFNULL(category,\'\') LIKE ?)');
+  const sql = `SELECT * FROM application_types WHERE ${clauses.join(' AND ')} ORDER BY search_weight DESC, name_hindi LIMIT 30;`;
+  const params: string[] = [];
+  for (const w of words) {
+    const pattern = `%${w}%`;
+    params.push(pattern, pattern, pattern, pattern);
+  }
+  return getDb().getAllAsync<ApplicationType>(sql, ...params);
+}
+
+/** Get application types by category. */
+export async function getApplicationTypesByCategory(category: string): Promise<ApplicationType[]> {
+  return getDb().getAllAsync<ApplicationType>(
+    'SELECT * FROM application_types WHERE category = ? ORDER BY search_weight DESC, name_hindi;', category,
+  );
 }
 
 /** Delete a generated application and its escalation chain (orphaned escalations). */

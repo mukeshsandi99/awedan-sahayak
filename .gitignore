@@ -35,3 +35,6 @@ desktop.ini
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+app/AwedanSahayak/google-services.json
+server/data/token_ledger.json

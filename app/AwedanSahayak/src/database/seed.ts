@@ -1,4 +1,5 @@
 import { OfficeInsert, ApplicationTypeInsert } from '../types/database';
+import { NEW_TEMPLATES } from './seed-expansion';
 
 // ── Office seeds (14 office types — generic category cards) ──────────
 //
@@ -196,6 +197,20 @@ export const OFFICE_SEEDS: OfficeInsert[] = [
     type: 'bcd',
     name_hindi: 'भवन निर्माण विभाग (BCD)',
     name_english: 'Building Construction Department (BCD)',
+    district: null,
+    block: null,
+    full_address: null,
+    phone_number: null,
+    latitude: null,
+    longitude: null,
+    working_hours: null,
+    landmark: null,
+    is_verified: 0,
+  },
+  {
+    type: 'transport',
+    name_hindi: 'परिवहन विभाग / आरटीओ',
+    name_english: 'Transport Department / RTO',
     district: null,
     block: null,
     full_address: null,
@@ -644,9 +659,9 @@ export const APPLICATION_TYPE_SEEDS: ApplicationTypeInsert[] = [
   {
     office_type: 'bdo', name_hindi: 'मनरेगा जॉब कार्ड आवेदन', name_english: 'MGNREGA Job Card Application',
     keywords: JSON.stringify(['मनरेगा','MGNREGA','जॉब कार्ड','job card','नरेगा','NREGA','मजदूरी','रोजगार']),
-    required_fields: withBase(['job_card_number','family_members','bank_account','aadhar_last4','village_panchayat','preferred_work',G]),
+    required_fields: withBase(['job_card_number','family_members','bank_account_last4','aadhar_last4','village_panchayat','preferred_work',G]),
     prompt_template: pa('bdo', 'मनरेगा जॉब कार्ड आवेदन',
-      'आवेदक का ग्राम पंचायत, परिवार के वयस्क सदस्यों की संख्या और बैंक खाता विवरण दें। आधार के अंतिम 4 अंक बताएं। पूर्व का जॉब कार्ड नंबर (यदि कोई हो) और किस प्रकार का कार्य (भूमि समतलीकरण, तालाब निर्माण, सड़क निर्माण, वृक्षारोपण आदि) चाहिए बताएं। मनरेगा योजनांतर्गत जॉब कार्ड निर्गत कर 100 दिन का रोजगार उपलब्ध कराने का अनुरोध करें।'),
+      'आवेदक का ग्राम पंचायत, परिवार के वयस्क सदस्यों की संख्या और बैंक का नाम, शाखा और खाते के अंतिम चार अंक दें। आधार के अंतिम 4 अंक बताएं। पूर्व का जॉब कार्ड नंबर (यदि कोई हो) और किस प्रकार का कार्य (भूमि समतलीकरण, तालाब निर्माण, सड़क निर्माण, वृक्षारोपण आदि) चाहिए बताएं। मनरेगा योजनांतर्गत जॉब कार्ड निर्गत कर 100 दिन का रोजगार उपलब्ध कराने का अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
   {
@@ -676,9 +691,9 @@ export const APPLICATION_TYPE_SEEDS: ApplicationTypeInsert[] = [
   {
     office_type: 'bdo', name_hindi: 'वृद्धा/विधवा पेंशन आवेदन', name_english: 'Old Age / Widow Pension Application',
     keywords: JSON.stringify(['पेंशन','pension','वृद्धा','old age','विधवा','widow','विकलांग','disability']),
-    required_fields: withBase(['pension_type','age','marital_status','income','bpl_status','bank_account','aadhar_last4','disability_percentage',G]),
+    required_fields: withBase(['pension_type','age','marital_status','income','bpl_status','bank_account_last4','aadhar_last4','disability_percentage',G]),
     prompt_template: pa('bdo', 'वृद्धावस्था/विधवा/विकलांग पेंशन आवेदन',
-      'किस प्रकार की पेंशन (वृद्धावस्था, विधवा, विकलांग) हेतु आवेदन है बताएं। आयु, वैवाहिक स्थिति, आय और BPL स्थिति का उल्लेख करें। विकलांग पेंशन होने पर विकलांगता का प्रकार और प्रतिशत बताएं। बैंक खाता विवरण और आधार संलग्न करने का उल्लेख करें। पात्रतानुसार पेंशन स्वीकृत कर भुगतान का अनुरोध करें।'),
+      'किस प्रकार की पेंशन (वृद्धावस्था, विधवा, विकलांग) हेतु आवेदन है बताएं। आयु, वैवाहिक स्थिति, आय और BPL स्थिति का उल्लेख करें। विकलांग पेंशन होने पर विकलांगता का प्रकार और प्रतिशत बताएं। बैंक का नाम, शाखा और खाते के अंतिम चार अंक और आधार संलग्न करने का उल्लेख करें। पात्रतानुसार पेंशन स्वीकृत कर भुगतान का अनुरोध करें।'),
     requires_legal_disclaimer: 0, disclaimer_text: null,
   },
 

@@ -22,7 +22,8 @@ export type OfficeType =
   | 'school'
   | 'pwd'
   | 'rcd'
-  | 'bcd';
+  | 'bcd'
+  | 'transport';
 
 // ── Table row types ─────────────────────────────────────────────────
 

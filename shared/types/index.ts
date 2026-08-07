@@ -25,7 +25,8 @@ export type OfficeType =
   | 'school'
   | 'pwd'
   | 'rcd'
-  | 'bcd';
+  | 'bcd'
+  | 'transport';
 
 /** Hindi + English labels for each office type. */
 export const OFFICE_LABELS: Record<OfficeType, { hi: string; en: string }> = {
@@ -42,7 +43,8 @@ export const OFFICE_LABELS: Record<OfficeType, { hi: string; en: string }> = {
   school:  { hi: 'विद्यालय',                 en: 'School' },
   pwd:     { hi: 'लोक निर्माण विभाग (PWD)',  en: 'Public Works Department (PWD)' },
   rcd:     { hi: 'ग्रामीण कार्य विभाग (RCD)', en: 'Rural Construction Department (RCD)' },
-  bcd:     { hi: 'भवन निर्माण विभाग (BCD)',  en: 'Building Construction Department (BCD)' },
+  bcd:       { hi: 'भवन निर्माण विभाग (BCD)',  en: 'Building Construction Department (BCD)' },
+  transport:  { hi: 'परिवहन विभाग / आरटीओ',      en: 'Transport Department / RTO' },
 };
 
 /** Designation used in the "सेवा में" (To) section for each office type. */
@@ -60,7 +62,8 @@ export const OFFICE_DESIGNATIONS: Record<OfficeType, string> = {
   school:  'प्रधानाध्यापक/प्राचार्य महोदय',
   pwd:     'कार्यपालक अभियंता महोदय',
   rcd:     'कार्यपालक अभियंता महोदय',
-  bcd:     'कार्यपालक अभियंता महोदय',
+  bcd:       'कार्यपालक अभियंता महोदय',
+  transport:  'परिवहन अधिकारी / आरटीओ अधिकारी महोदय',
 };
 
 // ── API contracts ──────────────────────────────────────────────────────

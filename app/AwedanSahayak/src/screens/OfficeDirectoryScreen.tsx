@@ -40,6 +40,7 @@ const OFFICE_ICONS: Record<OfficeType, keyof typeof Ionicons.glyphMap> = {
   pwd: 'hammer',
   rcd: 'map',
   bcd: 'home',
+  transport: 'car',
 };
 
 const OFFICE_COLORS: Record<OfficeType, string> = {
@@ -57,6 +58,7 @@ const OFFICE_COLORS: Record<OfficeType, string> = {
   pwd: '#4E342E',
   rcd: '#BF360C',
   bcd: '#37474F',
+  transport: '#1565C0',
 };
 
 const OFFICE_LABELS: Record<OfficeType, string> = {
@@ -74,6 +76,7 @@ const OFFICE_LABELS: Record<OfficeType, string> = {
   pwd: 'लोक निर्माण विभाग (PWD)',
   rcd: 'ग्रामीण कार्य विभाग (RCD)',
   bcd: 'भवन निर्माण विभाग (BCD)',
+  transport: 'परिवहन विभाग / RTO (Transport)',
 };
 
 // ── Component ───────────────────────────────────────────────────────

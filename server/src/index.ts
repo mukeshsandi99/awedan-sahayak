@@ -24,6 +24,7 @@ import { generateRouter } from './routes/generate';
 import { ocrRouter } from './routes/ocr';
 import { scanRouter } from './routes/scan';
 import { billingRouter } from './routes/billing';
+import { aiRouter } from './routes/aiRoutes';
 import { getActiveConfig } from './services/aiService';
 import { createLogger } from './config/logger';
 import { createAuthMiddleware } from './middleware/auth';
@@ -144,6 +145,7 @@ app.use('/api', authMiddleware, generateRouter);
 app.use('/api', authMiddleware, ocrRouter);
 app.use('/api', authMiddleware, scanRouter);
 app.use('/api', authMiddleware, billingRouter);
+app.use('/api', authMiddleware, aiRouter);
 
 // ── Error handler ──────────────────────────────────────────────────
 
@@ -163,7 +165,8 @@ const server = app.listen(env.port, () => {
 });
 
 // ── Server-level timeout ────────────────────────────────────────────
-// Free-tier Render cold starts + AI generation can be slow, but we cap
-// at 50s so clients get a response rather than an indefinite hang.
-// (Client-side timeout is 45s — this gives the server a 5s buffer.)
-server.timeout = 50_000; // 50 seconds
+// AI generation on free-tier Render + cold starts can take 60-90s.
+// We cap at 120s — long enough for DeepSeek to respond, short enough
+// that the client gets a response rather than an indefinite hang.
+// Client-side timeouts are 45s (default) / 90s (AI routes).
+server.timeout = 120_000; // 120 seconds

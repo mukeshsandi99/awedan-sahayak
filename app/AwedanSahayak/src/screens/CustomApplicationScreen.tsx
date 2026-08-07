@@ -30,9 +30,9 @@ import { getUserProfile, insertGeneratedApplication } from '../database/db';
 import type { UserProfile } from '../types/database';
 import type { HomeStackParamList } from '../navigation/HomeStack';
 import { useVoiceInput } from '../hooks/useVoiceInput';
-import { API_BASE_URL } from '../config';
 import { canGenerateApplication, incrementFreeUsage, consumePaidCredit } from '../services/usageTracker';
-import { fetchWithTimeout, FetchTimeoutError } from '../utils/fetchWithTimeout';
+import { generateCustomApplication } from '../services/apiClient';
+import { FetchTimeoutError } from '../utils/fetchWithTimeout';
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -295,21 +295,18 @@ export default function CustomApplicationScreen({ route, navigation }: Props) {
     };
 
     try {
-      const response = await fetchWithTimeout(
-        `${API_BASE_URL}/api/generate-custom-application`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        },
-        45_000, // 45s — enough for Render cold start + AI generation
+      const apiResult = await generateCustomApplication(
+        officeName,
+        recipientDesignation || null,
+        customDescription,
+        identityFormData,
       );
 
-      const result = await response.json();
-      if (!response.ok || !result.success) {
-        throw new Error(result.error ?? `Server responded with ${response.status}`);
+      if (!apiResult.ok) {
+        throw new Error(apiResult.error || 'Generation failed');
       }
 
+      const result = apiResult.data!;
       console.log(`[CustomApp] Generated ${result.generatedText.length} chars via ${result.metadata?.provider}/${result.metadata?.model}`);
 
       // Save to local SQLite
