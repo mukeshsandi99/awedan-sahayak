@@ -1,0 +1,82 @@
+async function validateAndRepair(
+  initialResult: AIResponse,
+  formData: Record<string, string>,
+  systemPrompt: string,
+): Promise<AIResponse> {
+  const qScore = qualityScore(initialResult.generatedText);
+  const factResult = validateFacts(formData, initialResult.generatedText);
+  const criticalCount = factResult.mismatches.filter((m) => m.severity === 'critical').length;
+  const warningCount   = factResult.mismatches.filter((m) => m.severity === 'warning').length;
+
+  // Always log validation metrics
+  log.info(
+    `[AIRouter] Validation: qualityScore=${qScore} factScore=${factResult.score} ` +
+    `criticalCount=${criticalCount} warningCount=${warningCount}`,
+  );
+
+  // Rule 1: quality >= 90 AND no critical errors -> accept immediately
+  if (qScore >= 90 && criticalCount === 0) {
+    log.info(`[AIRouter] qualityScore=${qScore}>=90, criticalCount=0, accepting without repair.`);
+    return initialResult;
+  }
+
+  // Rule 2: No critical errors (warnings only) -> accept, no repair
+  if (criticalCount === 0) {
+    log.info(`[AIRouter] criticalCount=0, warningCount=${warningCount}, accepting (warnings only, no repair needed).`);
+    return initialResult;
+  }
+
+  // Rule 3: Critical errors detected -> attempt repair
+  const repairTriggered = true;
+  log.warn(
+    `[AIRouter] Quality=${qScore}, factScore=${factResult.score}, ` +
+    `criticalCount=${criticalCount}, warningCount=${warningCount}, repairTriggered=${repairTriggered}`,
+  );
+
+  try {
+    const repairPrompt = factResult.repairPrompt ??
+      `Fix factual errors in this draft. Ensure all names, dates, places match the form data exactly.\n\n${initialResult.generatedText.substring(0, 500)}`;
+    const repairRequest: AIRequest = {
+      systemPrompt: repairPrompt,
+      userMessage: `Fix this draft:\n\n${initialResult.generatedText}`,
+      maxTokens: Math.max(initialResult.generatedText.length + 500, 2000),
+    };
+
+    const repairedResult = await dispatchWithRetry(repairRequest);
+    const repairedScore = qualityScore(repairedResult.generatedText);
+    const repairedFactResult = validateFacts(formData, repairedResult.generatedText);
+    const repairedCritical = repairedFactResult.mismatches.filter((m) => m.severity === 'critical').length;
+
+    const repairSucceeded = repairedScore > qScore || repairedCritical < criticalCount;
+
+    log.info(
+      `[AIRouter] Repair result: qualityScore=${repairedScore} factScore=${repairedFactResult.score} ` +
+      `criticalCount=${repairedCritical} repairTriggered=true repairSucceeded=${repairSucceeded}`,
+    );
+
+    if (repairSucceeded) {
+      log.info(`[AIRouter] Repair improved: Q=${qScore}->${repairedScore} C=${criticalCount}->${repairedCritical}`);
+      repairedResult.fallbackUsed = initialResult.fallbackUsed;
+      return repairedResult;
+    }
+
+    // Repair didn't help, accept original if quality is passable
+    if (qScore >= 50) {
+      log.warn(`[AIRouter] Repair didn't improve, but qualityScore=${qScore}>=50, accepting original.`);
+      return initialResult;
+    }
+
+    // Quality too low even after repair failure -> truly unusable
+    log.error(`[AIRouter] qualityScore=${qScore}<50 after repair failure, rejecting.`);
+    throw Object.assign(new Error('AI output quality too low after repair failure.'), { code: 'AI_FACT_MISMATCH' });
+
+  } catch (err: any) {
+    if (err.code === 'AI_FACT_MISMATCH') throw err;
+    // Network / timeout during repair -> accept original if passable
+    if (qScore >= 50) {
+      log.warn(`[AIRouter] Repair errored (${err.message?.substring(0, 60)}), but qualityScore=${qScore}>=50, accepting original.`);
+      return initialResult;
+    }
+    throw Object.assign(new Error('AI output quality too low.'), { code: 'AI_OUTPUT_INVALID' });
+  }
+}

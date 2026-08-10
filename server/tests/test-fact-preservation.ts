@@ -1,7 +1,7 @@
 /**
  * FACT PRESERVATION TEST SUITE
  *
- * Run:  npx tsx src/test-fact-preservation.ts
+ * Run:  npx tsx tests/test-fact-preservation.ts
  *
  * Tests 25 scenarios across:
  *   - ProtectedFacts parser
@@ -15,11 +15,11 @@
  *   - False positive prevention
  */
 
-import { extractProtectedFacts, ProtectedPerson, ProtectedFacts, buildImmutableFactsBlock } from './services/ai/ProtectedFacts';
-import { validateRelationships } from './services/ai/RelationshipValidator';
-import { detectForbiddenInventions, checkOwnershipSafety, checkAllegationSafety } from './services/ai/ForbiddenDetector';
-import { computeFactDiff } from './services/ai/FactDiff';
-import { generateFallbackApplication } from './services/ai/FallbackGenerator';
+import { extractProtectedFacts, ProtectedPerson, ProtectedFacts, buildImmutableFactsBlock } from '../src/services/ai/ProtectedFacts';
+import { validateRelationships } from '../src/services/ai/RelationshipValidator';
+import { detectForbiddenInventions, checkOwnershipSafety, checkAllegationSafety } from '../src/services/ai/ForbiddenDetector';
+import { computeFactDiff } from '../src/services/ai/FactDiff';
+import { generateFallbackApplication } from '../src/services/ai/FallbackGenerator';
 
 // ── Minimal test harness ──────────────────────────────────────────────────
 
