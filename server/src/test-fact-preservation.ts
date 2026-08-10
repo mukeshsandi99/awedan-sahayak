@@ -430,10 +430,105 @@ assert(casteReviseFinding !== undefined,
   casteReviseFinding ? `detected: ${casteReviseFinding.severity}` : 'NOT DETECTED');
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SECTION N: PDF INTEGRITY AUDIT
+// SECTION N: REGRESSION TESTS FOR LIVE PRODUCTION FAILURES (TESTS A-G)
 // ═══════════════════════════════════════════════════════════════════════════
 
-section('N — PDF INTEGRITY');
+section('N — LIVE FAILURE REGRESSION TESTS');
+
+// TEST A: Generic धमकी MUST NOT become death threat
+const genericThreatInput: Record<string, string> = {
+  applicant_name: 'परीक्षण', village: 'परीक्षण', district: 'परीक्षण', thana: 'परीक्षण',
+  custom_description: 'धमकाते मारते-पीटते रहते हैं',
+};
+const genericFacts = extractProtectedFacts(genericThreatInput);
+const deathThreatOutput = 'इन्होंने जान से मारने की धमकी दी।';
+const dtResult = detectForbiddenInventions(deathThreatOutput, genericFacts.allegations);
+const dtFinding = dtResult.findings.find(f => f.category === 'death_threat');
+assert(dtFinding !== undefined,
+  'REGRESSION A: Generic धमकी → जान से मारने की धमकी detected as CRITICAL',
+  dtFinding ? `severity=${dtFinding.severity}` : 'NOT DETECTED');
+assert(dtResult.passed === false,
+  'REGRESSION A: Forbidden result passed=false for invented death threat');
+
+// TEST B: No weapon → लाठी/हथियार MUST be CRITICAL FAIL
+const noWeaponInput: Record<string, string> = {
+  applicant_name: 'परीक्षण', village: 'परीक्षण', district: 'परीक्षण', thana: 'परीक्षण',
+  custom_description: 'मारपीट और गाली-गलौज की',
+};
+const noWeaponFacts = extractProtectedFacts(noWeaponInput);
+const weaponOutput = 'इन्होंने लाठी और हथियार से हमला किया।';
+const wpResult = detectForbiddenInventions(weaponOutput, noWeaponFacts.allegations);
+const wpFinding = wpResult.findings.find(f => f.category === 'weapons');
+assert(wpFinding !== undefined,
+  'REGRESSION B: Invented weapon (लाठी/हथियार) detected as CRITICAL',
+  wpFinding ? `severity=${wpFinding.severity}` : 'NOT DETECTED');
+
+// TEST C: No serious injury → गंभीर रूप से घायल MUST be CRITICAL FAIL
+const noInjuryInput: Record<string, string> = {
+  applicant_name: 'परीक्षण', village: 'परीक्षण', district: 'परीक्षण', thana: 'परीक्षण',
+  custom_description: 'मारपीट की',
+};
+const noInjuryFacts = extractProtectedFacts(noInjuryInput);
+const injuryOutput = 'प्रार्थी गंभीर रूप से घायल हो गया।';
+const ijResult = detectForbiddenInventions(injuryOutput, noInjuryFacts.allegations);
+const ijFinding = ijResult.findings.find(f => f.category === 'serious_injury');
+assert(ijFinding !== undefined,
+  'REGRESSION C: Invented serious injury (गंभीर रूप से घायल) detected as CRITICAL',
+  ijFinding ? `severity=${ijFinding.severity}` : 'NOT DETECTED');
+
+// TEST D: No prior FIR → पहले से FIR MUST be CRITICAL FAIL
+const noFirInput: Record<string, string> = {
+  applicant_name: 'परीक्षण', village: 'परीक्षण', district: 'परीक्षण', thana: 'परीक्षण',
+  custom_description: 'मारपीट और गाली-गलौज',
+};
+const noFirFacts = extractProtectedFacts(noFirInput);
+const priorFirOutput = 'पहले से FIR दर्ज है। पूर्व में प्राथमिकी दर्ज की गई थी।';
+const pfResult = detectForbiddenInventions(priorFirOutput, noFirFacts.allegations);
+const pfFinding = pfResult.findings.find(f => f.category === 'prior_fir_history');
+assert(pfFinding !== undefined,
+  'REGRESSION D: Invented prior FIR detected as CRITICAL',
+  pfFinding ? `severity=${pfFinding.severity}` : 'NOT DETECTED');
+
+// TEST E: Police application REQUESTING FIR → should be ALLOWED (not flagged)
+const policeReqInput: Record<string, string> = {
+  applicant_name: 'परीक्षण', village: 'परीक्षण', district: 'परीक्षण', thana: 'परीक्षण',
+  custom_description: 'मारपीट हुई। कृपया प्राथमिकी दर्ज करें।',
+};
+const policeReqFacts = extractProtectedFacts(policeReqInput);
+const policeReqOutput = 'अतः श्रीमान से निवेदन है कि प्राथमिकी दर्ज करने की कृपा करें।';
+const prResult = detectForbiddenInventions(policeReqOutput, policeReqFacts.allegations);
+const prPriorFir = prResult.findings.find(f => f.category === 'prior_fir_history');
+assert(prPriorFir === undefined,
+  'REGRESSION E: Police FIR request (प्राथमिकी दर्ज करें) NOT flagged as prior FIR',
+  prPriorFir ? `FALSE POSITIVE: ${prPriorFir.description}` : 'OK');
+
+// TEST F: अनूप → तिलक MUST be detected as relationship error
+const wrongFatherDraft = 'अनूप यादव पिता स्वर्गीय तिलक यादव ने मारपीट की।';
+const wfRelResult = validateRelationships(fixtureFacts, wrongFatherDraft);
+const wfAnoop = wfRelResult.errors.find(e => e.person === 'अनूप यादव');
+assert(wfAnoop !== undefined,
+  'REGRESSION F: अनूप→तिलक detected as relationship error',
+  wfAnoop ? `detected: ${wfAnoop.type}` : 'NOT DETECTED');
+assert(wfRelResult.passed === false,
+  'REGRESSION F: Relationship result passed=false for wrong father');
+
+// TEST G: पोखन/खिरोधर/मोहन → प्रेम MUST be detected as relationship errors
+const multiWrongDraft = 'पोखन यादव पिता प्रेम यादव, खिरोधर यादव पिता प्रेम यादव, मोहन यादव पिता प्रेम यादव ने मारपीट की।';
+const mwRelResult = validateRelationships(fixtureFacts, multiWrongDraft);
+const mwPokhan = mwRelResult.errors.find(e => e.person === 'पोखन यादव');
+const mwKhirodhar = mwRelResult.errors.find(e => e.person === 'खिरोधर यादव');
+const mwMohan = mwRelResult.errors.find(e => e.person === 'मोहन यादव');
+assert(mwPokhan !== undefined, 'REGRESSION G: पोखन→प्रेम detected as relationship error');
+assert(mwKhirodhar !== undefined, 'REGRESSION G: खिरोधर→प्रेम detected as relationship error');
+assert(mwMohan !== undefined, 'REGRESSION G: मोहन→प्रेम detected as relationship error');
+assert(mwRelResult.passed === false,
+  'REGRESSION G: Relationship result passed=false for multiple wrong fathers');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION O: PDF INTEGRITY AUDIT
+// ═══════════════════════════════════════════════════════════════════════════
+
+section('O — PDF INTEGRITY');
 
 // The PDF generator receives validated text. We verify the server-side
 // courtPdf.ts / biodataPdf.ts don't modify application text.

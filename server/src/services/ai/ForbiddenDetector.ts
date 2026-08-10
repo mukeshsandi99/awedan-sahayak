@@ -137,21 +137,45 @@ const CATEGORIES: CategoryDef[] = [
     description: 'Serious injury / blood / hospitalization — not stated by user',
   },
 
-  // ── FIR / Case number ────────────────────────────────────────────────
+  // ── FIR / Legal section request (ALLOWED for police applications) ────
+  // Only reject INVENTED PRIOR FIR history, not normal police-action requests.
   {
-    id: 'fir_case',
+    id: 'prior_fir_history',
+    severity: 'CRITICAL',
+    patterns: [
+      /पहले\s*से\s*(?:ही\s*)?(?:FIR|प्राथमिकी|एफ\.?\s*आई\.?\s*आर\.?)\s*(?:दर्ज|मौजूद|है)/,
+      /(?:पूर्व|पहले)\s*(?:में\s*)?(?:FIR|प्राथमिकी|एफ\.?\s*आई\.?\s*आर\.?)\s*(?:दर्ज|संख्या|नं)/,
+      /पूर्व\s*में\s*दर्ज\s*प्राथमिकी/,
+      /पिछली\s*(?:FIR|प्राथमिकी)/,
+      /(?:FIR|प्राथमिकी)\s*(?:संख्या|नं\.?|No\.?)\s*\d/,
+      /prior\s*FIR|existing\s*FIR|previous\s*FIR/i,
+    ],
+    description: 'Prior/existing FIR history invented — not stated by user',
+  },
+
+  // ── Invented arrest ──────────────────────────────────────────────────
+  {
+    id: 'invented_arrest',
+    severity: 'CRITICAL',
+    patterns: [
+      /गिरफ्तार\s*(?:कर|किया)/,
+      /गिरफ्तारी/,
+      /हिरासत\s*में\s*ले/,
+    ],
+    description: 'Arrest/detention claim invented — not stated by user',
+  },
+
+  // ── Invented legal sections ──────────────────────────────────────────
+  {
+    id: 'invented_legal_sections',
     severity: 'WARNING',
     patterns: [
-      /एफ\.?\s*आई\.?\s*आर\.?/,
-      /प्राथमिकी/,
-      /FIR\s*(?:No|Number|दर्ज)/,
-      /case\s*(?:No|Number|संख्या)/i,
       /धारा\s*\d{2,4}/,
       /IPC\s*\d/,
       /CrPC\s*\d/,
       /BNS\s*\d/,
     ],
-    description: 'FIR/case number or legal section — not stated by user',
+    description: 'Legal section (IPC/CrPC/BNS) invented — not stated by user',
   },
 
   // ── Medical report ───────────────────────────────────────────────────

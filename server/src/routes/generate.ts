@@ -10,6 +10,11 @@ import { Router, Request, Response } from 'express';
 import { AIRouter } from '../services/ai/AIRouter';
 import { createLogger } from '../config/logger';
 import { aiLimiter } from '../middleware/rateLimit';
+import { extractProtectedFacts } from '../services/ai/ProtectedFacts';
+import { validateRelationships } from '../services/ai/RelationshipValidator';
+import { detectForbiddenInventions, checkOwnershipSafety, checkAllegationSafety } from '../services/ai/ForbiddenDetector';
+import { computeFactDiff, sanitizeForProduction } from '../services/ai/FactDiff';
+import { generateFallbackApplication } from '../services/ai/FallbackGenerator';
 
 const log = createLogger('Generate');
 
@@ -85,19 +90,72 @@ generateRouter.post('/generate-application', async (req: Request, res: Response)
       formData,
     });
 
-    log.info(`[POST /generate-application] Success — ${result.generatedText.length} chars, ${result.provider}/${result.model} (fallback=${result.fallbackUsed}, repair=${result.repairApplied ?? false}, qScore=${result.qualityScore ?? 'N/A'})`);
+    // ═══════════════════════════════════════════════════════════════════
+    // FINAL SAFETY GATE — Run before sending ANY text to user
+    // ═══════════════════════════════════════════════════════════════════
+    const safetyFacts = extractProtectedFacts(formData);
+    const safetyRel = validateRelationships(safetyFacts, result.generatedText);
+    const safetyForbidden = detectForbiddenInventions(result.generatedText, safetyFacts.allegations);
+    const safetyOwnership = checkOwnershipSafety(result.generatedText, safetyFacts.ownershipBasis || '');
+    const safetyAllegation = checkAllegationSafety(result.generatedText, safetyFacts.allegations);
+    const safetyDiff = computeFactDiff(safetyFacts, result.generatedText, safetyRel, safetyForbidden, safetyOwnership.safe, safetyAllegation.safe);
+
+    const validationMeta = {
+      protectedPeopleCount: safetyFacts.people.length,
+      allegationsCount: safetyFacts.allegations.length,
+      allegationsSource: safetyFacts.allegations.length > 0 ? 'extracted' : 'EMPTY',
+      relationshipErrors: safetyRel.errors.length,
+      forbiddenFindings: safetyForbidden.findings.length,
+      forbiddenCritical: safetyForbidden.findings.filter(f => f.severity === 'CRITICAL').length,
+      criticalFailuresCount: safetyDiff.missing + safetyDiff.changed + safetyDiff.invented,
+      repairAttempted: result.repairApplied ?? false,
+      fallbackApplied: result.fallbackUsed,
+      finalValidationStatus: safetyDiff.status,
+      factDiff: sanitizeForProduction(safetyDiff),
+    };
+
+    // If the final gate fails AND fallback wasn't already used, force fallback
+    let finalText = result.generatedText;
+    let finalFallbackUsed = result.fallbackUsed;
+    let finalRepairApplied = result.repairApplied ?? false;
+
+    if (safetyDiff.status === 'FAIL' && !result.fallbackUsed) {
+      log.warn(`[SAFETY GATE] Unsafe AI text detected — forcing deterministic fallback. ${sanitizeForProduction(safetyDiff)}`);
+      finalText = generateFallbackApplication({
+        facts: safetyFacts,
+        officeType,
+        applicationName,
+        userDescription: formData['custom_description'] || formData['incident_details'] || '',
+      });
+      finalFallbackUsed = true;
+      finalRepairApplied = false;
+
+      // Re-validate fallback
+      const fbRel = validateRelationships(safetyFacts, finalText);
+      const fbForbidden = detectForbiddenInventions(finalText, safetyFacts.allegations);
+      const fbDiff = computeFactDiff(safetyFacts, finalText, fbRel, fbForbidden, true, true);
+      if (fbDiff.status !== 'PASS') {
+        log.error(`[SAFETY GATE] CRITICAL: Even fallback failed validation! ${sanitizeForProduction(fbDiff)}`);
+      }
+      validationMeta.fallbackApplied = true;
+      validationMeta.finalValidationStatus = fbDiff.status;
+    }
+
+    log.info(`[POST /generate-application] ${validationMeta.factDiff}`);
+
     res.json({
       success: true,
-      generatedText: result.generatedText,
+      generatedText: finalText,
       metadata: {
         provider: result.provider,
         model: result.model,
         usage: result.usage,
-        fallbackUsed: result.fallbackUsed,
+        fallbackUsed: finalFallbackUsed,
         durationMs: result.durationMs,
         qualityScore: result.qualityScore,
-        repairApplied: result.repairApplied ?? false,
+        repairApplied: finalRepairApplied,
         refinementAvailable: result.refinementAvailable ?? false,
+        _validation: validationMeta,
       },
     });
   } catch (err: any) {
