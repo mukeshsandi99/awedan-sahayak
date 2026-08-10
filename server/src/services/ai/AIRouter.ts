@@ -311,8 +311,11 @@ function assessDraft(result: AIResponse, formData: Record<string, string>): Draf
   // ── NEW: Forbidden allegation detection ─────────────────────────────
   const forbiddenResult = detectForbiddenInventions(result.generatedText, facts.allegations);
   const forbiddenFindings = forbiddenResult.findings.length;
+  log.info(`[AIRouter] Forbidden check: passed=${forbiddenResult.passed} findings=${forbiddenFindings} allegations=${facts.allegations.length} sentences`);
   if (!forbiddenResult.passed) {
-    for (const f of forbiddenResult.findings.filter(f => f.severity === 'CRITICAL')) {
+    const criticalForbidden = forbiddenResult.findings.filter(f => f.severity === 'CRITICAL');
+    log.warn(`[AIRouter] Forbidden CRITICAL: ${criticalForbidden.map(f => f.category).join(', ')}`);
+    for (const f of criticalForbidden) {
       criticalFailures.push(`FORBIDDEN: ${f.description} ("${f.phrase}")`);
     }
     for (const f of forbiddenResult.findings.filter(f => f.severity === 'WARNING')) {
@@ -397,7 +400,10 @@ async function validateAndRepair(
   const elapsed = Date.now() - requestStart;
   const assessment = assessDraft(initialResult, formData);
 
-  log.info(`[AIRouter] Assessment: Q=${assessment.qualityScore} F=${assessment.factScore} crit=${assessment.criticalFailures.length} nonCrit=${assessment.nonCriticalIssues.length} elapsed=${elapsed}ms`);
+  log.info(`[AIRouter] Assessment: Q=${assessment.qualityScore} F=${assessment.factScore} crit=${assessment.criticalFailures.length} nonCrit=${assessment.nonCriticalIssues.length} relErr=${assessment.relationshipErrors} forb=${assessment.forbiddenFindings} elapsed=${elapsed}ms`);
+  if (assessment.criticalFailures.length > 0) {
+    log.warn(`[AIRouter] Critical failures: ${assessment.criticalFailures.join(' | ')}`);
+  }
 
   // No critical failures → return immediately
   if (assessment.criticalFailures.length === 0) {
