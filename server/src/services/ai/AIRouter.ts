@@ -18,6 +18,11 @@ import { ClaudeProvider } from './ClaudeProvider';
 import { DeepSeekProvider } from './DeepSeekProvider';
 import { validateInput, validateOutput, qualityScore, AICostTracker } from './AIValidator';
 import { validateFacts } from './FactValidator';
+import { extractProtectedFacts, buildImmutableFactsBlock } from './ProtectedFacts';
+import { validateRelationships } from './RelationshipValidator';
+import { detectForbiddenInventions, checkOwnershipSafety, checkAllegationSafety } from './ForbiddenDetector';
+import { computeFactDiff, sanitizeForProduction } from './FactDiff';
+import { generateFallbackApplication } from './FallbackGenerator';
 import { AICircuitBreaker } from './AICircuitBreaker';
 import crypto from 'crypto';
 
@@ -190,6 +195,8 @@ export const AIRouter = {
     // Step 5: Validate
     t1 = Date.now();
     (result as any)._requestStartMs = t0;
+    (result as any)._officeType = req.officeType;
+    (result as any)._applicationName = req.applicationName;
     const final = await validateAndRepair(result, req.formData, systemPrompt);
     profile.push({ stage: 'validation_repair', durationMs: Date.now() - t1 });
 
@@ -223,6 +230,8 @@ export const AIRouter = {
 
     t1 = Date.now();
     (result as any)._requestStartMs = t0;
+    (result as any)._officeType = 'custom';
+    (result as any)._applicationName = req.officeName || 'Custom Application';
     const final = await validateAndRepair(result, req.formData, systemPrompt);
     profile.push({ stage: 'validation_repair', durationMs: Date.now() - t1 });
 
@@ -264,6 +273,8 @@ interface DraftAssessment {
   qualityScore: number;
   factsPassed: boolean;
   factScore: number;
+  relationshipErrors: number;
+  forbiddenFindings: number;
 }
 
 function assessDraft(result: AIResponse, formData: Record<string, string>): DraftAssessment {
@@ -286,11 +297,52 @@ function assessDraft(result: AIResponse, formData: Record<string, string>): Draf
   if (nonCriticalMismatches.length > 0) {
     nonCriticalIssues.push(`${nonCriticalMismatches.length} non-critical mismatch(es)`);
   }
+
+  // ── NEW: Relationship validation ────────────────────────────────────
+  const facts = extractProtectedFacts(formData);
+  const relResult = validateRelationships(facts, result.generatedText);
+  const relationshipErrors = relResult.errors.length;
+  if (!relResult.passed) {
+    for (const e of relResult.errors) {
+      criticalFailures.push(`RELATIONSHIP: ${e.detail}`);
+    }
+  }
+
+  // ── NEW: Forbidden allegation detection ─────────────────────────────
+  const forbiddenResult = detectForbiddenInventions(result.generatedText, facts.allegations);
+  const forbiddenFindings = forbiddenResult.findings.length;
+  if (!forbiddenResult.passed) {
+    for (const f of forbiddenResult.findings.filter(f => f.severity === 'CRITICAL')) {
+      criticalFailures.push(`FORBIDDEN: ${f.description} ("${f.phrase}")`);
+    }
+    for (const f of forbiddenResult.findings.filter(f => f.severity === 'WARNING')) {
+      nonCriticalIssues.push(`FORBIDDEN: ${f.description} ("${f.phrase}")`);
+    }
+  }
+
+  // ── NEW: Ownership safety ───────────────────────────────────────────
+  const ownershipCheck = checkOwnershipSafety(result.generatedText, facts.ownershipBasis || '');
+  if (!ownershipCheck.safe) {
+    criticalFailures.push(`OWNERSHIP: ${ownershipCheck.violation}`);
+  }
+
+  // ── NEW: Allegation strengthening ───────────────────────────────────
+  const allegationCheck = checkAllegationSafety(result.generatedText, facts.allegations);
+  if (!allegationCheck.safe) {
+    for (const v of allegationCheck.violations) {
+      criticalFailures.push(`ALLEGATION: ${v}`);
+    }
+  }
+
   if (qScore >= 30 && qScore < 70 && criticalFailures.length === 0) {
     nonCriticalIssues.push(`Style score below target: ${qScore}/100`);
   }
 
-  return { criticalFailures, nonCriticalIssues, qualityScore: qScore, factsPassed: factResult.passed, factScore: factResult.score };
+  return {
+    criticalFailures, nonCriticalIssues, qualityScore: qScore,
+    factsPassed: factResult.passed, factScore: factResult.score,
+    relationshipErrors, forbiddenFindings,
+  };
 }
 
 // ── validateAndRepair ────────────────────────────────────────────────────
@@ -359,20 +411,34 @@ async function validateAndRepair(
   log.warn(`[AIRouter] Critical: ${assessment.criticalFailures.join('; ')}`);
   const remaining = TOTAL_BUDGET_MS - elapsed;
   if (remaining < REPAIR_MIN_BUDGET_MS) {
-    log.warn(`[AIRouter] No time for repair (${remaining}ms < ${REPAIR_MIN_BUDGET_MS}ms)`);
-    initialResult.qualityScore = assessment.qualityScore;
+    log.warn(`[AIRouter] No time for repair (${remaining}ms < ${REPAIR_MIN_BUDGET_MS}ms) — using deterministic fallback`);
+    const facts = extractProtectedFacts(formData);
+    const fallbackText = generateFallbackApplication({
+      facts,
+      officeType: (initialResult as any)._officeType || 'thana',
+      applicationName: (initialResult as any)._applicationName || 'आवेदन',
+      userDescription: formData['custom_description'] || formData['incident_details'] || '',
+    });
+    initialResult.generatedText = fallbackText;
+    initialResult.qualityScore = 100;
     initialResult.repairApplied = false;
-    initialResult.refinementAvailable = true;
+    initialResult.fallbackUsed = true;
+    initialResult.refinementAvailable = false;
+    log.info(`[AIRouter] Deterministic fallback used — ${fallbackText.length} chars. Fact diff: ${sanitizeForProduction(computeFactDiff(facts, fallbackText, null, null, true, true))}`);
     return initialResult;
   }
 
-  // Attempt repair
+  // Attempt AI repair
   try {
+    const facts = extractProtectedFacts(formData);
     const repairPrompt = buildCriticalRepairPrompt(assessment.criticalFailures, formData, initialResult.generatedText);
+    // Inject immutable facts block into repair prompt
+    const immutableBlock = buildImmutableFactsBlock(facts);
+    const fullRepairPrompt = `${immutableBlock}\n\n${repairPrompt}`;
     const repairTokens = Math.min(Math.max(initialResult.generatedText.length + 500, 1000), 2000);
     const repairResult = await dispatchWithRetry({
       systemPrompt: 'Fix only the listed issues. Keep everything else identical. Return full corrected text.',
-      userMessage: repairPrompt,
+      userMessage: fullRepairPrompt,
       maxTokens: repairTokens,
     }, []);
 
@@ -385,15 +451,37 @@ async function validateAndRepair(
       repairResult.refinementAvailable = repairedAssessment.nonCriticalIssues.length > 0;
       return repairResult;
     }
-    log.warn('[AIRouter] Repair did not help — returning original');
+    log.warn('[AIRouter] Repair did not help — using deterministic fallback');
+    const fallbackText = generateFallbackApplication({
+      facts,
+      officeType: (initialResult as any)._officeType || 'thana',
+      applicationName: (initialResult as any)._applicationName || 'आवेदन',
+      userDescription: formData['custom_description'] || formData['incident_details'] || '',
+    });
+    initialResult.generatedText = fallbackText;
+    initialResult.qualityScore = 100;
+    initialResult.repairApplied = false;
+    initialResult.fallbackUsed = true;
+    initialResult.refinementAvailable = false;
+    log.info(`[AIRouter] Fallback used after failed repair. Fact diff: ${sanitizeForProduction(computeFactDiff(facts, fallbackText, null, null, true, true))}`);
+    return initialResult;
   } catch (e: any) {
-    log.warn(`[AIRouter] Repair failed: ${e?.message?.substring(0, 60)}`);
+    log.warn(`[AIRouter] Repair failed: ${e?.message?.substring(0, 60)} — using deterministic fallback`);
+    const facts = extractProtectedFacts(formData);
+    const fallbackText = generateFallbackApplication({
+      facts,
+      officeType: (initialResult as any)._officeType || 'thana',
+      applicationName: (initialResult as any)._applicationName || 'आवेदन',
+      userDescription: formData['custom_description'] || formData['incident_details'] || '',
+    });
+    initialResult.generatedText = fallbackText;
+    initialResult.qualityScore = 100;
+    initialResult.repairApplied = false;
+    initialResult.fallbackUsed = true;
+    initialResult.refinementAvailable = false;
+    log.info(`[AIRouter] Fallback used after repair exception.`);
+    return initialResult;
   }
-
-  initialResult.qualityScore = assessment.qualityScore;
-  initialResult.repairApplied = false;
-  initialResult.refinementAvailable = true;
-  return initialResult;
 }
 
 function buildCriticalRepairPrompt(failures: string[], formData: Record<string, string>, draft: string): string {
@@ -525,7 +613,12 @@ function buildUserMessage(req: AIGenerateRequest): string {
     filled = filled.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value || `({{${key}}})`);
   }
   const applicantBlock = Object.entries(req.formData).map(([k, v]) => `${k}: ${v}`).join('\n');
-  return `${filled}\n\nप्रार्थी की जानकारी:\n${applicantBlock}`;
+
+  // ── NEW: Inject immutable facts block ─────────────────────────────
+  const facts = extractProtectedFacts(req.formData);
+  const immutableBlock = buildImmutableFactsBlock(facts);
+
+  return `${immutableBlock}\n\n${filled}\n\nप्रार्थी की जानकारी:\n${applicantBlock}`;
 }
 
 function buildCustomUserMessage(req: AICustomGenerateRequest): string {

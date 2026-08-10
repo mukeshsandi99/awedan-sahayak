@@ -10,6 +10,11 @@
 
 import { Router, Request, Response } from 'express';
 import { buildProtectedBlock, findLostFacts, REPAIR_INSTRUCTION, isIdentityCritical } from '../services/factGuard';
+import { extractProtectedFacts, buildImmutableFactsBlock } from '../services/ai/ProtectedFacts';
+import { validateRelationships } from '../services/ai/RelationshipValidator';
+import { detectForbiddenInventions, checkOwnershipSafety, checkAllegationSafety } from '../services/ai/ForbiddenDetector';
+import { computeFactDiff, sanitizeForProduction } from '../services/ai/FactDiff';
+import { generateFallbackApplication } from '../services/ai/FallbackGenerator';
 
 export const aiRouter = Router();
 
@@ -130,7 +135,62 @@ ${factBlock}
 \u090A\u092A\u0930 \u0926\u093F\u090F \u0917\u090F \u0938\u092D\u0940 \u0924\u0925\u094D\u092F\u094B\u0902 \u0915\u094B \u091C\u094D\u092F\u094B\u0902 \u0915\u093E \u0924\u094D\u092F\u094B\u0902 \u0930\u0916\u0924\u0947 \u0939\u0941\u090F \u090F\u0915 \u0938\u0902\u092A\u0942\u0930\u094D\u0923 \u0914\u092A\u091A\u093E\u0930\u093F\u0915 \u0939\u093F\u0902\u0926\u0940 \u0906\u0935\u0947\u0926\u0928 \u092A\u0924\u094D\u0930 \u0932\u093F\u0916\u0947\u0902\u0964`;
 
   try {
-    const text = await callAi(sysPrompt, userMsg, 8000);
+    let text = await callAi(sysPrompt, userMsg, 8000);
+
+    // ── NEW: Fact validation for custom route ──────────────────────
+    const customFacts = extractProtectedFacts(formData);
+    const customRelResult = validateRelationships(customFacts, text);
+    const customForbidden = detectForbiddenInventions(text, customFacts.allegations);
+    const customOwnership = checkOwnershipSafety(text, customFacts.ownershipBasis || '');
+    const customAllegation = checkAllegationSafety(text, customFacts.allegations);
+
+    const customDiff = computeFactDiff(
+      customFacts, text, customRelResult, customForbidden,
+      customOwnership.safe, customAllegation.safe,
+    );
+
+    console.log('[custom] Fact diff:', sanitizeForProduction(customDiff));
+
+    // If critical failures, attempt ONE repair then fallback
+    if (customDiff.status === 'FAIL') {
+      console.log('[custom] Critical fact failures — attempting repair...');
+      const immutableBlock = buildImmutableFactsBlock(customFacts);
+      const repairPrompt = `${immutableBlock}\n\nFIX THE FOLLOWING ISSUES in this application draft:\n${customDiff.missingDetails.join('\n')}\n${customDiff.changedDetails.join('\n')}\n${customDiff.inventedDetails.join('\n')}\n\nDRAFT:\n${text}`;
+
+      try {
+        const repaired = await callAi(
+          'Fix only the listed factual errors. Do NOT change any other text. Return full corrected text.',
+          repairPrompt,
+          8000,
+        );
+        // Re-validate repair
+        const repRelResult = validateRelationships(customFacts, repaired);
+        const repForbidden = detectForbiddenInventions(repaired, customFacts.allegations);
+        const repDiff = computeFactDiff(customFacts, repaired, repRelResult, repForbidden,
+          checkOwnershipSafety(repaired, customFacts.ownershipBasis || '').safe,
+          checkAllegationSafety(repaired, customFacts.allegations).safe,
+        );
+        if (repDiff.status === 'PASS') {
+          text = repaired;
+          console.log('[custom] Repair passed.');
+        } else {
+          console.log('[custom] Repair failed — using deterministic fallback.');
+          text = generateFallbackApplication({
+            facts: customFacts, officeType: 'custom',
+            applicationName: officeName || 'आवेदन',
+            userDescription: customDescription || '',
+          });
+        }
+      } catch {
+        console.log('[custom] Repair error — using deterministic fallback.');
+        text = generateFallbackApplication({
+          facts: customFacts, officeType: 'custom',
+          applicationName: officeName || 'आवेदन',
+          userDescription: customDescription || '',
+        });
+      }
+    }
+
     const { getActiveConfig } = await import('../services/aiService');
     const config = getActiveConfig();
     res.json({
