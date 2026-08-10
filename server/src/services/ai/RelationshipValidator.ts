@@ -116,15 +116,19 @@ export function validateRelationships(
     }
   }
 
-  // 4. Check for invented people (names in output not in input)
+  // 4. SWAPPED_FATHER: only run for people WITHOUT explicit mappings.
+  //    Explicit mappings (पिता: X) are authoritative — never overridden.
+  //    Swap requires explicit evidence: both parties must have their
+  //    nearest (non-explicit) father wrong in a mirrored way.
+  const peopleWithExplicit = new Set<string>();
   for (const person of facts.people) {
     if (!person.relationName) continue;
-    // Check if any other person's name + father combo is impossible
-    // (e.g., two people who should have different fathers both get the same wrong father)
+    if (findExplicitFather(generatedText, person.name,
+      facts.people.filter(p => p.relationName).map(p => p.relationName!))) {
+      peopleWithExplicit.add(person.name);
+    }
   }
 
-  // 5. SWAPPED_FATHER: use proximity matching to avoid false positives
-  //    on dense comma-separated lists where windows overlap.
   const allFatherNames = [...new Set(
     facts.people.filter(p => p.relationName).map(p => p.relationName!)
   )];
@@ -133,13 +137,16 @@ export function validateRelationships(
       const a = facts.people[i];
       const b = facts.people[j];
       if (!a.relationName || !b.relationName) continue;
-      if (a.relationName === b.relationName) continue; // Same father — OK
+      if (a.relationName === b.relationName) continue;
+
+      // Skip if either person has an explicit mapping — it's authoritative
+      if (peopleWithExplicit.has(a.name) || peopleWithExplicit.has(b.name)) continue;
 
       const nearestA = findNearestFather(generatedText, a.name, allFatherNames);
       const nearestB = findNearestFather(generatedText, b.name, allFatherNames);
 
-      // Only flag if A's nearest father is B's father AND B's nearest father is A's father
-      if (nearestA === b.relationName && nearestB === a.relationName) {
+      if (nearestA && nearestB &&
+          nearestA === b.relationName && nearestB === a.relationName) {
         errors.push({
           type: 'SWAPPED_FATHER',
           person: `${a.name} ↔ ${b.name}`,

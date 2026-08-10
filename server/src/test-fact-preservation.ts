@@ -592,6 +592,68 @@ assert(ewPokhan !== undefined,
   'FP-F: Explicit wrong father (पोखन, पिता: प्रेम) detected in bulleted format',
   ewPokhan ? `detected: ${ewPokhan.type}` : 'NOT DETECTED');
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION N3: STRESS TEST — ALL FORMATS WITH CORRECT MAPPINGS
+// ═══════════════════════════════════════════════════════════════════════════
+
+section('N3 — FORMAT STRESS TESTS');
+
+const all8Bulleted = '- रंजीत यादव, पिता: स्वर्गीय राजकुमार यादव\n- अनूप यादव, पिता: स्वर्गीय राजकुमार यादव\n- पोखन यादव, पिता: स्वर्गीय तिलक यादव\n- खिरोधर यादव, पिता: स्वर्गीय तिलक यादव\n- मोहन यादव, पिता: स्वर्गीय तिलक यादव\n- प्रेम यादव, पिता: स्वर्गीय तिलक यादव\n- नकुल यादव, पिता: प्रेम यादव\n- अजय यादव, पिता: सिविल यादव';
+
+// STRESS-A: Bulleted LF
+const rA = validateRelationships(fixtureFacts, all8Bulleted);
+assertEqual(rA.errors.length, 0, 'STRESS-A: LF bulleted list → 0 errors');
+
+// STRESS-B: Bulleted CRLF
+const all8CRLF = all8Bulleted.replace(/\n/g, '\r\n');
+const rB = validateRelationships(fixtureFacts, all8CRLF);
+assertEqual(rB.errors.length, 0, 'STRESS-B: CRLF bulleted list → 0 errors');
+
+// STRESS-C: Comma-separated पिता format
+const commaPita = 'रंजीत यादव पिता स्वर्गीय राजकुमार यादव, अनूप यादव पिता स्वर्गीय राजकुमार यादव, पोखन यादव पिता स्वर्गीय तिलक यादव, खिरोधर यादव पिता स्वर्गीय तिलक यादव, मोहन यादव पिता स्वर्गीय तिलक यादव, प्रेम यादव पिता स्वर्गीय तिलक यादव, नकुल यादव पिता प्रेम यादव, अजय यादव पिता सिविल यादव';
+const rC = validateRelationships(fixtureFacts, commaPita);
+assertEqual(rC.errors.length, 0, 'STRESS-C: Comma-separated पिता → 0 errors');
+
+// STRESS-D: "के पिता" format
+const kePita = 'रंजीत यादव के पिता स्वर्गीय राजकुमार यादव। अनूप यादव के पिता स्वर्गीय राजकुमार यादव। पोखन यादव के पिता स्वर्गीय तिलक यादव। खिरोधर यादव के पिता स्वर्गीय तिलक यादव। मोहन यादव के पिता स्वर्गीय तिलक यादव। प्रेम यादव के पिता स्वर्गीय तिलक यादव। नकुल यादव के पिता प्रेम यादव। अजय यादव के पिता सिविल यादव।';
+const rD = validateRelationships(fixtureFacts, kePita);
+assertEqual(rD.errors.length, 0, 'STRESS-D: "के पिता" format → 0 errors');
+
+// STRESS-E: "पिता " (no colon)
+const pitaSpace = 'रंजीत यादव पिता स्वर्गीय राजकुमार यादव\nअनूप यादव पिता स्वर्गीय राजकुमार यादव\nपोखन यादव पिता स्वर्गीय तिलक यादव\nखिरोधर यादव पिता स्वर्गीय तिलक यादव\nमोहन यादव पिता स्वर्गीय तिलक यादव\nप्रेम यादव पिता स्वर्गीय तिलक यादव\nनकुल यादव पिता प्रेम यादव\nअजय यादव पिता सिविल यादव';
+const rE = validateRelationships(fixtureFacts, pitaSpace);
+assertEqual(rE.errors.length, 0, 'STRESS-E: "पिता " (no colon) → 0 errors');
+
+// STRESS-F: Semicolon-separated
+const semiSep = 'रंजीत यादव, पिता: स्वर्गीय राजकुमार यादव; अनूप यादव, पिता: स्वर्गीय राजकुमार यादव; पोखन यादव, पिता: स्वर्गीय तिलक यादव; खिरोधर यादव, पिता: स्वर्गीय तिलक यादव; मोहन यादव, पिता: स्वर्गीय तिलक यादव; प्रेम यादव, पिता: स्वर्गीय तिलक यादव; नकुल यादव, पिता: प्रेम यादव; अजय यादव, पिता: सिविल यादव';
+const rF = validateRelationships(fixtureFacts, semiSep);
+assertEqual(rF.errors.length, 0, 'STRESS-F: Semicolon-separated → 0 errors');
+
+// STRESS-G: Actual 2-person swap still detected
+const actualSwap = 'अनूप यादव पिता स्वर्गीय तिलक यादव, पोखन यादव पिता स्वर्गीय राजकुमार यादव';
+const rG = validateRelationships(fixtureFacts, actualSwap);
+const gSwap = rG.errors.filter(e => e.type === 'SWAPPED_FATHER' || e.type === 'WRONG_FATHER');
+assert(gSwap.length > 0, 'STRESS-G: Actual 2-person swap still detected');
+assertEqual(rG.passed, false, 'STRESS-G: Actual swap → passed=false');
+
+// STRESS-H: Wrong father still detected (adversarial)
+const wrongF = 'अनूप यादव पिता स्वर्गीय तिलक यादव ने मारपीट की।';
+const rH = validateRelationships(fixtureFacts, wrongF);
+assert(rH.errors.length > 0, 'STRESS-H: Wrong father still detected');
+assertEqual(rH.passed, false, 'STRESS-H: Wrong father → passed=false');
+
+// STRESS-I: Missing father still detected
+const missingF = 'पोखन यादव ने मारपीट की।';
+const rI = validateRelationships(fixtureFacts, missingF);
+const iMiss = rI.errors.find(e => e.type === 'MISSING_FATHER' && e.person === 'पोखन यादव');
+assert(iMiss !== undefined, 'STRESS-I: Missing father still detected');
+
+// STRESS-J: Fallback format with ALL explicit mappings → 0 errors
+const fbFacts = extractProtectedFacts(SANTOSH_FIXTURE);
+const fbGen = generateFallbackApplication({ facts: fbFacts, officeType: 'thana', applicationName: 'परीक्षण', userDescription: '' });
+const rJ = validateRelationships(fbFacts, fbGen);
+assertEqual(rJ.errors.length, 0, 'STRESS-J: Production fallback format → 0 errors');
+
 // TEST N: CRLF line endings do not break explicit pattern matching
 const crlfBulleted = '- रंजीत यादव, पिता: स्वर्गीय राजकुमार यादव\r\n- अनूप यादव, पिता: स्वर्गीय राजकुमार यादव\r\n- पोखन यादव, पिता: स्वर्गीय तिलक यादव\r\n- खिरोधर यादव, पिता: स्वर्गीय तिलक यादव\r\n- मोहन यादव, पिता: स्वर्गीय तिलक यादव\r\n- प्रेम यादव, पिता: स्वर्गीय तिलक यादव\r\n- नकुल यादव, पिता: प्रेम यादव\r\n- अजय यादव, पिता: सिविल यादव';
 const crlfResult = validateRelationships(fixtureFacts, crlfBulleted);
