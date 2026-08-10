@@ -147,6 +147,7 @@ generateRouter.post('/generate-application', async (req: Request, res: Response)
       success: true,
       generatedText: finalText,
       metadata: {
+        buildSha: '93ba4a9',
         provider: result.provider,
         model: result.model,
         usage: result.usage,
