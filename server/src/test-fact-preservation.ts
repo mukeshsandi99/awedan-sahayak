@@ -525,6 +525,74 @@ assert(mwRelResult.passed === false,
   'REGRESSION G: Relationship result passed=false for multiple wrong fathers');
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SECTION N2: FALSE POSITIVE REGRESSION TESTS FOR FALLBACK FORMAT
+// ═══════════════════════════════════════════════════════════════════════════
+
+section('N2 — FALLBACK FALSE POSITIVE REGRESSION');
+
+// TEST H: Correct fallback list format → 0 errors
+const fbText = generateFallbackApplication({
+  facts: fixtureFacts,
+  officeType: 'thana',
+  applicationName: 'परीक्षण',
+  userDescription: '',
+});
+const fbResult = validateRelationships(fixtureFacts, fbText);
+assertEqual(fbResult.errors.length, 0,
+  'FP-A: Correct fallback list format → 0 relationship errors');
+
+// TEST I: Actual swapped father still detected
+const swappedDraft2 = 'पोखन यादव पिता प्रेम यादव ने मारपीट की।';
+const swapResult2 = validateRelationships(fixtureFacts, swappedDraft2);
+assert(swapResult2.errors.length > 0,
+  'FP-B: Actual wrong father (पोखन→प्रेम) still detected',
+  `errors: ${swapResult2.errors.length}`);
+assert(swapResult2.passed === false,
+  'FP-B: passed=false for actual wrong father');
+
+// TEST J: Correct father passes
+const correctSingle = 'पोखन यादव पिता स्वर्गीय तिलक यादव ने मारपीट की।';
+const csResult = validateRelationships(fixtureFacts, correctSingle);
+// MISSING_PERSON for other 7 is expected in a single-person draft
+const csPokhan = csResult.errors.find(e => e.person === 'पोखन यादव');
+assert(csPokhan === undefined,
+  'FP-C: पोखन→तिलक explicit father passes',
+  csPokhan ? `unexpected: ${csPokhan.type}` : 'OK');
+
+// TEST K: Correct shared father group
+const sharedGroup = 'रंजीत यादव और अनूप यादव दोनों के पिता स्वर्गीय राजकुमार यादव ने मारपीट की।';
+const sgResult = validateRelationships(fixtureFacts, sharedGroup);
+const sgRanjit = sgResult.errors.find(e => e.person === 'रंजीत यादव');
+const sgAnoop = sgResult.errors.find(e => e.person === 'अनूप यादव');
+assert(sgRanjit === undefined,
+  'FP-D: रंजीत in shared group "दोनों के पिता" passes',
+  sgRanjit ? `error: ${sgRanjit.type}` : 'OK');
+assert(sgAnoop === undefined,
+  'FP-D: अनूप in shared group "दोनों के पिता" passes',
+  sgAnoop ? `error: ${sgAnoop.type}` : 'OK');
+
+// TEST L: Correct group relation "सभी के पिता"
+const groupAll = 'पोखन यादव, खिरोधर यादव, मोहन यादव एवं प्रेम यादव, सभी के पिता स्वर्गीय तिलक यादव ने मारपीट की।';
+const gaResult = validateRelationships(fixtureFacts, groupAll);
+const gaPokhan = gaResult.errors.find(e => e.person === 'पोखन यादव');
+const gaPrem = gaResult.errors.find(e => e.person === 'प्रेम यादव');
+assert(gaPokhan === undefined,
+  'FP-E: पोखन in group "सभी के पिता" passes',
+  gaPokhan ? `error: ${gaPokhan.type}` : 'OK');
+assert(gaPrem === undefined,
+  'FP-E: प्रेम in group "सभी के पिता" passes',
+  gaPrem ? `error: ${gaPrem.type}` : 'OK');
+
+// TEST M: Wrong father still detected in adversarial draft (existing test #7 already covers this)
+// Additional check: explicit wrong father in bulleted format
+const explicitWrong = '- पोखन यादव, पिता: प्रेम यादव\n- खिरोधर यादव, पिता: स्वर्गीय तिलक यादव';
+const ewResult = validateRelationships(fixtureFacts, explicitWrong);
+const ewPokhan = ewResult.errors.find(e => e.person === 'पोखन यादव' && e.type === 'WRONG_FATHER');
+assert(ewPokhan !== undefined,
+  'FP-F: Explicit wrong father (पोखन, पिता: प्रेम) detected in bulleted format',
+  ewPokhan ? `detected: ${ewPokhan.type}` : 'NOT DETECTED');
+
+// ═══════════════════════════════════════════════════════════════════════════
 // SECTION O: PDF INTEGRITY AUDIT
 // ═══════════════════════════════════════════════════════════════════════════
 

@@ -78,22 +78,40 @@ export function validateRelationships(
         continue;
       }
 
-      // 3. Check for WRONG_FATHER using proximity-based matching
+      // 3. Check for WRONG_FATHER — prefer explicit pattern over proximity
       const allFatherNames = [...new Set(
         facts.people.filter(p => p.relationName).map(p => p.relationName!)
       )];
-      const nearestFather = findNearestFather(generatedText, person.name, allFatherNames);
 
-      if (nearestFather && nearestFather !== person.relationName &&
-          !fuzzyContains(nearestFather, person.relationName)) {
-        // Found a different father closer to this person than the correct one
-        errors.push({
-          type: 'WRONG_FATHER',
-          person: person.name,
-          expected: person.relationName,
-          found: nearestFather,
-          detail: `${person.name} appears with ${nearestFather} instead of ${person.relationName}`,
-        });
+      // First: try to find an explicit "पिता: X" or "पिता X" pattern
+      // near the person's name. This is more reliable than proximity.
+      const explicitFather = findExplicitFather(generatedText, person.name, allFatherNames);
+
+      if (explicitFather) {
+        // Explicit pattern found — use it directly
+        if (explicitFather !== person.relationName &&
+            !fuzzyContains(explicitFather, person.relationName)) {
+          errors.push({
+            type: 'WRONG_FATHER',
+            person: person.name,
+            expected: person.relationName,
+            found: explicitFather,
+            detail: `${person.name} appears with ${explicitFather} instead of ${person.relationName}`,
+          });
+        }
+      } else {
+        // No explicit pattern — fall back to proximity-based matching
+        const nearestFather = findNearestFather(generatedText, person.name, allFatherNames);
+        if (nearestFather && nearestFather !== person.relationName &&
+            !fuzzyContains(nearestFather, person.relationName)) {
+          errors.push({
+            type: 'WRONG_FATHER',
+            person: person.name,
+            expected: person.relationName,
+            found: nearestFather,
+            detail: `${person.name} appears with ${nearestFather} instead of ${person.relationName}`,
+          });
+        }
       }
     }
   }
@@ -136,6 +154,42 @@ export function validateRelationships(
     passed: errors.length === 0,
     errors,
   };
+}
+
+/**
+ * Find an EXPLICIT father attribution near a person's name.
+ * Looks for patterns like "पिता: X", "पिता X", "के पिता X"
+ * within 50 chars after the person's name.
+ *
+ * Returns the father name found, or null if no explicit pattern found.
+ */
+const EXPLICIT_FATHER_RE = /(?:पिता|पति)\s*[:：]\s*(.+?)(?:[\n,\-]|$)|(?:के\s*)?(?:पिता|पति)\s+(.+?)(?:[\n,\-]|$)/;
+
+function findExplicitFather(text: string, personName: string, fatherNames: string[]): string | null {
+  const idx = text.indexOf(personName);
+  if (idx < 0) return null;
+
+  // Look at text from the person's name to 80 chars after
+  const afterName = idx + personName.length;
+  const windowEnd = Math.min(text.length, afterName + 80);
+  const window = text.substring(afterName, windowEnd);
+
+  // Try explicit pattern match
+  const match = window.match(EXPLICIT_FATHER_RE);
+  if (match) {
+    const candidate = (match[1] || match[2] || '').trim();
+    if (!candidate) return null;
+    // Check if this candidate matches any known father name
+    for (const fn of fatherNames) {
+      if (fuzzyContains(candidate, fn) || fuzzyContains(fn, candidate)) {
+        return fn;
+      }
+    }
+    // If candidate is a known person name but not a father, don't return it
+    return null;
+  }
+
+  return null;
 }
 
 /**
