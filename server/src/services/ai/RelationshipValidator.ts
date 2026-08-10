@@ -163,7 +163,7 @@ export function validateRelationships(
  *
  * Returns the father name found, or null if no explicit pattern found.
  */
-const EXPLICIT_FATHER_RE = /(?:पिता|पति)\s*[:：]\s*(.+?)(?:[\n,\-]|$)|(?:के\s*)?(?:पिता|पति)\s+(.+?)(?:[\n,\-]|$)/;
+const EXPLICIT_FATHER_RE = /(?:पिता|पति)\s*[:：]\s*(.+?)(?:[\r\n,\-]|$)|(?:के\s*)?(?:पिता|पति)\s+(.+?)(?:[\r\n,\-]|$)/;
 
 function findExplicitFather(text: string, personName: string, fatherNames: string[]): string | null {
   const idx = text.indexOf(personName);

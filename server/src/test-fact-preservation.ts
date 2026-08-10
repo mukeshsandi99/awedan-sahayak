@@ -592,6 +592,12 @@ assert(ewPokhan !== undefined,
   'FP-F: Explicit wrong father (पोखन, पिता: प्रेम) detected in bulleted format',
   ewPokhan ? `detected: ${ewPokhan.type}` : 'NOT DETECTED');
 
+// TEST N: CRLF line endings do not break explicit pattern matching
+const crlfBulleted = '- रंजीत यादव, पिता: स्वर्गीय राजकुमार यादव\r\n- अनूप यादव, पिता: स्वर्गीय राजकुमार यादव\r\n- पोखन यादव, पिता: स्वर्गीय तिलक यादव\r\n- खिरोधर यादव, पिता: स्वर्गीय तिलक यादव\r\n- मोहन यादव, पिता: स्वर्गीय तिलक यादव\r\n- प्रेम यादव, पिता: स्वर्गीय तिलक यादव\r\n- नकुल यादव, पिता: प्रेम यादव\r\n- अजय यादव, पिता: सिविल यादव';
+const crlfResult = validateRelationships(fixtureFacts, crlfBulleted);
+assertEqual(crlfResult.errors.length, 0,
+  'FP-G: CRLF bulleted list with all 8 explicit पिता: → 0 relationship errors');
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SECTION O: PDF INTEGRITY AUDIT
 // ═══════════════════════════════════════════════════════════════════════════
