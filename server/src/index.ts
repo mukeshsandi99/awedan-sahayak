@@ -1,19 +1,19 @@
-/**
- * Awedan Sahayak — Backend API Server
+﻿/**
+ * Awedan Sahayak â€” Backend API Server
  *
  * Express server providing AI-powered Hindi legal application drafting.
  */
 
 import dotenv from 'dotenv';
 
-// ═══════════════════════════════════════════════════════════════════════
-// 1. Load .env IMMEDIATELY — before any other imports that read env vars
-// ═══════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// 1. Load .env IMMEDIATELY â€” before any other imports that read env vars
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 dotenv.config();
 
-// ═══════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // 2. Validate environment BEFORE anything else starts
-// ═══════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 import { validateEnv, getEnvConfig } from './config/env';
 validateEnv();
 const env = getEnvConfig();
@@ -32,25 +32,25 @@ import { generalLimiter, aiLimiter, ocrLimiter } from './middleware/rateLimit';
 
 const app = express();
 
-// ── Logger ──────────────────────────────────────────────────────────
+// â”€â”€ Logger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const log = createLogger('Server');
 
-// ── Trust proxy (Render / reverse proxy) ────────────────────────────
+// â”€â”€ Trust proxy (Render / reverse proxy) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Render terminates TLS at its load balancer and forwards to the app
 // over HTTP. Without 'trust proxy', Express sees the LB's IP instead
-// of the client's real IP — which breaks rate limiting (all requests
+// of the client's real IP â€” which breaks rate limiting (all requests
 // appear from the same proxy IP).
 //
 // We trust 1 proxy hop (Render's load balancer). If deploying behind
 // multiple proxies, increase this number or set to true.
 app.set('trust proxy', 1);
 
-// ── Middleware ──────────────────────────────────────────────────────
+// â”€â”€ Middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// CORS — hardened for production
-// Native mobile apps send no Origin header → always allowed.
+// CORS â€” hardened for production
+// Native mobile apps send no Origin header â†’ always allowed.
 // Browser origins validated against ALLOWED_ORIGINS env var (comma-separated).
 // In development, localhost origins are always allowed.
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
@@ -61,7 +61,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '')
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Native mobile app requests have no Origin header — always allow
+      // Native mobile app requests have no Origin header â€” always allow
       if (!origin) {
         callback(null, true);
         return;
@@ -75,8 +75,8 @@ app.use(
 
       // Production: validate against allowlist
       if (allowedOrigins.length === 0) {
-        // No origins configured — block all browser requests in production
-        log.warn(`[CORS] Blocked browser origin "${origin}" — ALLOWED_ORIGINS is empty.`);
+        // No origins configured â€” block all browser requests in production
+        log.warn(`[CORS] Blocked browser origin "${origin}" â€” ALLOWED_ORIGINS is empty.`);
         callback(new Error('CORS not allowed from browser origins. Use the mobile app.'));
         return;
       }
@@ -96,50 +96,59 @@ app.use(
 // Default 100KB is far too small for camera-captured images.
 app.use(express.json({ limit: '10mb' }));
 
-// ── Startup banner ─────────────────────────────────────────────────
+// â”€â”€ Startup banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 try {
   const config = getActiveConfig();
   log.info('');
-  log.info('╔══════════════════════════════════════════╗');
-  log.info('║       आवेदन सहायक — API Server          ║');
-  log.info('╠══════════════════════════════════════════╣');
-  log.info(`║  Provider : ${config.provider.padEnd(30)}║`);
-  log.info(`║  Model    : ${config.model.padEnd(30)}║`);
-  log.info('╚══════════════════════════════════════════╝');
+  log.info('â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—');
+  log.info('â•‘       à¤†à¤µà¥‡à¤¦à¤¨ à¤¸à¤¹à¤¾à¤¯à¤• â€” API Server          â•‘');
+  log.info('â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£');
+  log.info(`â•‘  Provider : ${config.provider.padEnd(30)}â•‘`);
+  log.info(`â•‘  Model    : ${config.model.padEnd(30)}â•‘`);
+  log.info('â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•');
   log.info('');
 } catch (err: any) {
   log.error('Failed to initialize AI provider:', err.message);
   log.error('Set AI_PROVIDER and API keys in server/.env');
 }
 
-// ── Public routes (NO authentication required) ──────────────────────
+// â”€â”€ Public routes (NO authentication required) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.get('/api/health', (_req, res) => {
-  // Health response deliberately minimal — exposes no server internals
+  // Health response deliberately minimal â€” exposes no server internals
   res.json({ status: 'ok' });
 });
+	app.get('/api/version', (_req, res) => {
+	  res.json({
+	    gitSha: process.env.RENDER_GIT_COMMIT || 'unknown',
+	    build: 'fact-guard-44b4871',
+	    nodeEnv: env.nodeEnv,
+	    uptime: Math.floor(process.uptime()),
+	  });
+	});
 
-// ── General rate limiter ─────────────────────────────────────────────
+
+// â”€â”€ General rate limiter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Applies to ALL /api/* routes registered after this line.
 // Health endpoint (registered above) is NOT rate-limited.
 
 app.use('/api', generalLimiter());
 
-// ── Authentication middleware ───────────────────────────────────────
+// â”€â”€ Authentication middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Applied AFTER the health route so health remains public.
 // All routes registered AFTER this line require X-App-Token.
 
 const authMiddleware = createAuthMiddleware();
 
-// ── Protected API routes ────────────────────────────────────────────
+// â”€â”€ Protected API routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Each route also has a specific rate limiter applied in its own file:
-//   generate.ts  → aiLimiter (10 req / 15 min)
-//   ocr.ts       → ocrLimiter (10 req / 30 min)
-//   scan.ts      → ocrLimiter (scan-document) + aiLimiter (cleanup-ocr)
+//   generate.ts  â†’ aiLimiter (10 req / 15 min)
+//   ocr.ts       â†’ ocrLimiter (10 req / 30 min)
+//   scan.ts      â†’ ocrLimiter (scan-document) + aiLimiter (cleanup-ocr)
 
 app.use('/api', authMiddleware, generateRouter);
 app.use('/api', authMiddleware, ocrRouter);
@@ -147,26 +156,26 @@ app.use('/api', authMiddleware, scanRouter);
 app.use('/api', authMiddleware, billingRouter);
 app.use('/api', authMiddleware, aiRouter);
 
-// ── Error handler ──────────────────────────────────────────────────
+// â”€â”€ Error handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   log.error('Unhandled error:', err);
   res.status(500).json({
-    error: 'आंतरिक सर्वर त्रुटि / Internal server error',
+    error: 'à¤†à¤‚à¤¤à¤°à¤¿à¤• à¤¸à¤°à¥à¤µà¤° à¤¤à¥à¤°à¥à¤Ÿà¤¿ / Internal server error',
     ...(env.nodeEnv === 'development' ? { detail: err.message } : {}),
   });
 });
 
-// ── Start ──────────────────────────────────────────────────────────
+// â”€â”€ Start â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const server = app.listen(env.port, () => {
   log.info(`Listening on http://localhost:${env.port}`);
   log.info(`API: POST http://localhost:${env.port}/api/generate-application`);
 });
 
-// ── Server-level timeout ────────────────────────────────────────────
+// â”€â”€ Server-level timeout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // AI generation on free-tier Render + cold starts can take 60-90s.
-// We cap at 120s — long enough for DeepSeek to respond, short enough
+// We cap at 120s â€” long enough for DeepSeek to respond, short enough
 // that the client gets a response rather than an indefinite hang.
 // Client-side timeouts are 45s (default) / 90s (AI routes).
 server.timeout = 120_000; // 120 seconds
