@@ -119,15 +119,6 @@ app.get('/api/health', (_req, res) => {
   // Health response deliberately minimal â€” exposes no server internals
   res.json({ status: 'ok' });
 });
-	app.get('/api/version', (_req, res) => {
-	  res.json({
-	    gitSha: process.env.RENDER_GIT_COMMIT || 'unknown',
-	    build: 'fact-guard-44b4871',
-	    nodeEnv: env.nodeEnv,
-	    uptime: Math.floor(process.uptime()),
-	  });
-	});
-
 
 // â”€â”€ General rate limiter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
