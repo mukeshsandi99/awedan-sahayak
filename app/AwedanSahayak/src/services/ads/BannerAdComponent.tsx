@@ -7,11 +7,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { BannerAd, BannerAdSize, TestIds } from 'react-native-google-mobile-ads';
+import { BannerAd, BannerAdSize } from 'react-native-google-mobile-ads';
 import { AD_UNIT_IDS } from './AdConfig';
 import { getSubscriptionStatus } from '../usageTracker';
 
-const unitId = __DEV__ ? TestIds.BANNER : AD_UNIT_IDS.banner;
+const unitId = AD_UNIT_IDS.banner;
 
 export default function AdBanner() {
   const [visible, setVisible] = useState(false);

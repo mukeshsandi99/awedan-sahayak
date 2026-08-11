@@ -8,7 +8,7 @@
  *   - "साझा करें" — share text or PDF via WhatsApp etc.
  */
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,8 @@ import {
   Share,
   Platform,
   ActivityIndicator,
+  TextInput,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -27,6 +29,9 @@ import { generatePdf, sharePdf, isSaveSupported } from '../services/pdf';
 import { generateRtf, shareRtf } from '../services/rtf';
 import { scheduleReminder, cancelScheduledReminder } from '../services/reminders';
 import { updateGeneratedApplication, getGeneratedApplicationById } from '../database/db';
+import { reviseApplication } from '../services/apiClient';
+import { useVoiceInput } from '../hooks/useVoiceInput';
+import { printPdf } from '../services/printService';
 import MultiPagePdfViewer from '../components/pdf/MultiPagePdfViewer';
 
 // ── Types ───────────────────────────────────────────────────────────
@@ -42,6 +47,8 @@ export interface ApplicationPreviewContentProps {
   savedApplicationId?: number | null;
   /** Whether this is viewed from MyApplications (shows cancel option). */
   isFromMyApps?: boolean;
+  /** Original form data for fact preservation during AI revision */
+  formData?: Record<string, string>;
 }
 
 // ── Reminder options ──────────────────────────────────────────────────
@@ -61,11 +68,13 @@ export function ApplicationPreviewContent({
   onGoBack,
   savedApplicationId,
   isFromMyApps,
+  formData,
 }: ApplicationPreviewContentProps) {
 
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [pdfUri, setPdfUri] = useState<string | null>(null);
   const [pdfFilename, setPdfFilename] = useState<string>('');
+  const [printing, setPrinting] = useState(false);
 
   const [rtfGenerating, setRtfGenerating] = useState(false);
   const [rtfUri, setRtfUri] = useState<string | null>(null);
@@ -77,6 +86,114 @@ export function ApplicationPreviewContent({
   const [reminderDays, setReminderDays] = useState<number | null>(null);
   const [reminderScheduling, setReminderScheduling] = useState(false);
   const [notifId, setNotifId] = useState<string | null>(null);
+
+  // ── Edit mode state ───────────────────────────────────────────
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedText, setEditedText] = useState(generatedText);
+  const [aiRevising, setAiRevising] = useState(false);
+
+  const activeText = isEditing ? editedText : generatedText;
+
+  // ── Custom correction with voice ────────────────────────────
+
+  const [correctionText, setCorrectionText] = useState('');
+  const [voiceActive, setVoiceActive] = useState(false);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  const { isListening, partialText, startListening, stopListening } = useVoiceInput({
+    locale: 'hi-IN',
+    onResult: (text: string) => {
+      setCorrectionText(prev => {
+        const trimmed = prev.trim();
+        return trimmed.length > 0 ? trimmed + ' ' + text : text;
+      });
+      setVoiceActive(false);
+      stopPulse();
+    },
+    onError: (message: string) => {
+      Alert.alert('🎤 आवाज़ त्रुटि', message);
+      setVoiceActive(false);
+      stopPulse();
+    },
+  });
+
+  const startPulse = useCallback(() => {
+    pulseAnim.setValue(1);
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.2, duration: 600, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ]),
+    ).start();
+  }, [pulseAnim]);
+
+  const stopPulse = useCallback(() => {
+    pulseAnim.stopAnimation();
+    pulseAnim.setValue(1);
+  }, [pulseAnim]);
+
+  const handleVoiceCorrection = async () => {
+    if (voiceActive) {
+      await stopListening();
+      setVoiceActive(false);
+      stopPulse();
+    } else {
+      setVoiceActive(true);
+      startPulse();
+      await startListening();
+    }
+  };
+
+  const handleCustomRevise = () => {
+    const instruction = correctionText.trim();
+    if (!instruction) return;
+    handleAiRevise(instruction, 'सुधार लागू किया गया');
+    setCorrectionText('');
+  };
+
+  // ── AI Revision actions ──────────────────────────────────────
+
+  const handleAiRevise = useCallback(async (instruction: string, label: string) => {
+    if (aiRevising) return;
+    setAiRevising(true);
+    try {
+      const textToRevise = isEditing ? editedText : generatedText;
+      // Pass real formData for fact preservation — backend uses factGuard + protected block
+      const result = await reviseApplication(textToRevise, instruction, formData || {});
+      if (result.ok && result.data?.generatedText) {
+        setEditedText(result.data.generatedText);
+        setIsEditing(true);
+        Alert.alert('✅ ' + label, 'AI ने आवेदन को अपडेट कर दिया है।');
+      } else {
+        Alert.alert('त्रुटि', result.error || 'AI revision failed.');
+      }
+    } catch (err: any) {
+      Alert.alert('त्रुटि', err?.message || 'AI revision failed.');
+    } finally {
+      setAiRevising(false);
+    }
+  }, [aiRevising, isEditing, editedText, generatedText]);
+
+  const handleGrammar = () => handleAiRevise(
+    'कृपया इस आवेदन की व्याकरण (grammar) और वर्तनी (spelling) सुधारें। केवल भाषा सुधारें, तथ्य और नाम/पते न बदलें।',
+    'Grammar ठीक किया गया'
+  );
+
+  const handleShorten = () => handleAiRevise(
+    'कृपया इस आवेदन को संक्षिप्त (shorten) करें। मुख्य बातें रखें, अनावश्यक वाक्य हटाएं। तथ्य और नाम/पते न बदलें।',
+    'आवेदन छोटा किया गया'
+  );
+
+  const handleExpand = () => handleAiRevise(
+    'कृपया इस आवेदन को और विस्तृत (expand) करें। उचित कानूनी भाषा जोड़ें। तथ्य और नाम/पते न बदलें।',
+    'आवेदन विस्तृत किया गया'
+  );
+
+  const handleAiReview = () => handleAiRevise(
+    'कृपया इस आवेदन की समीक्षा करें जैसे कोई सरकारी अधिकारी करता। क्या सभी आवश्यक जानकारी है? क्या भाषा औपचारिक है? कोई कमी हो तो सुधारें।',
+    'AI Review पूरा हुआ'
+  );
 
   // ── Copy text to clipboard ──────────────────────────────────────
 
@@ -131,7 +248,7 @@ export function ApplicationPreviewContent({
     try {
       await Share.share({
         title: applicationName,
-        message: generatedText,
+        message: activeText,
       });
     } catch (err: any) {
       if (err?.message !== 'User did not share') {
@@ -148,9 +265,11 @@ export function ApplicationPreviewContent({
 
     try {
       const result = await generatePdf({
-        generatedText,
+        generatedText: activeText,
         applicationName,
         officeType,
+        // Only pass user-visible office name for non-custom types
+        officeName: officeType === 'custom' ? '' : getOfficeLabel(officeType),
       });
       setPdfUri(result.uri);
       setPdfFilename(result.filename);
@@ -168,7 +287,7 @@ export function ApplicationPreviewContent({
     } finally {
       setPdfGenerating(false);
     }
-  }, [pdfGenerating, generatedText, applicationName, officeType]);
+  }, [pdfGenerating, activeText, applicationName, officeType]);
 
   // ── Share PDF ───────────────────────────────────────────────────
 
@@ -204,6 +323,46 @@ export function ApplicationPreviewContent({
     );
   }, [pdfUri]);
 
+  // ── Print PDF ───────────────────────────────────────────────────
+
+  const handlePrint = useCallback(async () => {
+    if (printing) return;
+
+    // If PDF not yet generated, generate it first
+    let targetUri = pdfUri;
+    if (!targetUri) {
+      setPdfGenerating(true);
+      try {
+        const result = await generatePdf({
+          generatedText: activeText,
+          applicationName,
+          officeType: officeType || 'thana',
+          officeName: officeType === 'custom' ? '' : undefined,
+        });
+        targetUri = result.uri;
+        setPdfUri(result.uri);
+        setPdfFilename(result.filename);
+      } catch (err: any) {
+        Alert.alert(
+          '❌ PDF त्रुटि',
+          'PDF बनाने में समस्या आई।\n\n' + (err?.message ?? 'PDF generation failed.'),
+        );
+        setPdfGenerating(false);
+        return;
+      }
+      setPdfGenerating(false);
+    }
+
+    if (!targetUri) {
+      Alert.alert('प्रिंट त्रुटि', 'PDF उपलब्ध नहीं है।');
+      return;
+    }
+
+    setPrinting(true);
+    await printPdf(targetUri, applicationName || 'आवेदन पत्र');
+    setPrinting(false);
+  }, [printing, pdfUri, activeText, formData, applicationName, officeType]);
+
   // ── Generate RTF (Word document) ────────────────────────────────
 
   const handleGenerateRtf = useCallback(async () => {
@@ -212,7 +371,7 @@ export function ApplicationPreviewContent({
 
     try {
       const result = await generateRtf({
-        generatedText,
+        generatedText: activeText,
         applicationName,
       });
       setRtfUri(result.uri);
@@ -230,7 +389,7 @@ export function ApplicationPreviewContent({
     } finally {
       setRtfGenerating(false);
     }
-  }, [rtfGenerating, generatedText, applicationName]);
+  }, [rtfGenerating, activeText, applicationName]);
 
   // ── Share RTF ───────────────────────────────────────────────────
 
@@ -276,6 +435,24 @@ export function ApplicationPreviewContent({
             onError={(e) => console.warn('[Preview] PDF viewer error:', e)}
           />
         </View>
+      ) : isEditing ? (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={true}
+        >
+          <View style={styles.textCard}>
+            <TextInput
+              style={styles.editInput}
+              value={editedText}
+              onChangeText={setEditedText}
+              multiline
+              textAlignVertical="top"
+              autoCapitalize="sentences"
+              scrollEnabled={false}
+            />
+          </View>
+        </ScrollView>
       ) : (
         <ScrollView
           style={styles.scroll}
@@ -289,6 +466,91 @@ export function ApplicationPreviewContent({
           </View>
         </ScrollView>
       )}
+
+      {/* Custom correction input with voice mic */}
+      <View style={styles.correctionRow}>
+        <View style={styles.correctionInputWrapper}>
+          <TextInput
+            style={styles.correctionInput}
+            value={correctionText}
+            onChangeText={setCorrectionText}
+            placeholder="सुधार लिखें या बोलें..."
+            placeholderTextColor="#AAA"
+            multiline={false}
+            editable={!aiRevising}
+          />
+          <TouchableOpacity
+            onPress={handleVoiceCorrection}
+            activeOpacity={0.7}
+            style={[styles.micBtn, voiceActive && styles.micBtnActive]}
+            disabled={aiRevising}
+          >
+            {voiceActive ? (
+              <Animated.View style={{ opacity: pulseAnim }}>
+                <View style={styles.recDot} />
+              </Animated.View>
+            ) : (
+              <Ionicons name="mic-outline" size={20} color={voiceActive ? '#FFF' : '#E17055'} />
+            )}
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity
+          style={[styles.sendBtn, (!correctionText.trim() || aiRevising) && styles.sendBtnDisabled]}
+          onPress={handleCustomRevise}
+          disabled={!correctionText.trim() || aiRevising}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="send" size={16} color="#FFF" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Show partial transcription */}
+      {voiceActive && partialText.trim().length > 0 && (
+        <View style={styles.partialRow}>
+          <Text style={styles.partialText} numberOfLines={2}>
+            {partialText}
+          </Text>
+        </View>
+      )}
+
+      {/* Edit / AI revision toolbar */}
+      <View style={styles.editToolbar}>
+        <TouchableOpacity
+          style={[styles.editToggleBtn, isEditing && styles.editToggleActive]}
+          onPress={() => {
+            if (!isEditing) setEditedText(generatedText);
+            setIsEditing(!isEditing);
+          }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name={isEditing ? 'eye-outline' : 'create-outline'} size={16} color={isEditing ? '#FFF' : '#E17055'} />
+          <Text style={[styles.editToggleText, isEditing && styles.editToggleTextActive]}>
+            {isEditing ? 'व्यू मोड' : 'एडिट करें'}
+          </Text>
+        </TouchableOpacity>
+
+        {isEditing && (
+          <View style={styles.aiRow}>
+            <TouchableOpacity style={styles.aiBtn} onPress={handleGrammar} disabled={aiRevising}>
+              <Ionicons name="text-outline" size={14} color="#FFF" />
+              <Text style={styles.aiBtnText}>Grammar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.aiBtn, { backgroundColor: '#0984E3' }]} onPress={handleShorten} disabled={aiRevising}>
+              <Ionicons name="contract-outline" size={14} color="#FFF" />
+              <Text style={styles.aiBtnText}>छोटा</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.aiBtn, { backgroundColor: '#00B894' }]} onPress={handleExpand} disabled={aiRevising}>
+              <Ionicons name="expand-outline" size={14} color="#FFF" />
+              <Text style={styles.aiBtnText}>बड़ा</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.aiBtn, { backgroundColor: '#6C5CE7' }]} onPress={handleAiReview} disabled={aiRevising}>
+              <Ionicons name="checkmark-done-outline" size={14} color="#FFF" />
+              <Text style={styles.aiBtnText}>Review</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {aiRevising && <ActivityIndicator size="small" color="#E17055" style={{ marginTop: 8 }} />}
+      </View>
 
       {/* Action bar */}
       <View style={styles.actionBar}>
@@ -425,6 +687,26 @@ export function ApplicationPreviewContent({
               <Text style={styles.actionPrimaryText}>सेव करें</Text>
             </TouchableOpacity>
           )}
+
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              styles.actionPrint,
+              (printing || !pdfUri) && styles.actionButtonDisabled,
+            ]}
+            onPress={handlePrint}
+            disabled={printing || !pdfUri}
+            activeOpacity={0.7}
+          >
+            {printing ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <>
+                <Ionicons name="print-outline" size={18} color="#FFF" />
+                <Text style={styles.actionPrimaryText}>प्रिंट</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Row 3: Generate RTF (Word) + Share RTF */}
@@ -473,7 +755,7 @@ export function ApplicationPreviewContent({
 // ── HomeStack screen wrapper ──────────────────────────────────────────
 
 function ApplicationPreviewScreen({ route, navigation }: Props) {
-  const { applicationName, generatedText, officeType, savedApplicationId } = route.params;
+  const { applicationName, generatedText, officeType, savedApplicationId, formData } = route.params;
 
   return (
     <ApplicationPreviewContent
@@ -483,6 +765,7 @@ function ApplicationPreviewScreen({ route, navigation }: Props) {
       onGoBack={() => navigation.goBack()}
       savedApplicationId={savedApplicationId}
       isFromMyApps={false}
+      formData={formData}
     />
   );
 }
@@ -585,6 +868,32 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'System' : 'normal',
   },
 
+	  // Edit mode
+	  editInput: {
+	    fontSize: 16, lineHeight: 28, color: '#2D3436', minHeight: 300,
+	    fontFamily: Platform.OS === 'ios' ? 'System' : 'normal',
+	  },
+	  // Correction input with mic
+  correctionRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, gap: 6, borderTopWidth: 1, borderTopColor: '#F0E8E0' },
+  correctionInputWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 10, borderWidth: 1, borderColor: '#E8E8E8', paddingRight: 4 },
+  correctionInput: { flex: 1, paddingHorizontal: 12, paddingVertical: Platform.OS === 'ios' ? 10 : 8, fontSize: 14, color: '#1A1A2E', minHeight: 40 },
+  micBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFF0ED', alignItems: 'center', justifyContent: 'center' },
+  micBtnActive: { backgroundColor: '#D63031' },
+  recDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#D63031' },
+  sendBtn: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#E17055', alignItems: 'center', justifyContent: 'center' },
+  sendBtnDisabled: { backgroundColor: '#CCC' },
+  partialRow: { paddingHorizontal: 16, paddingBottom: 4 },
+  partialText: { fontSize: 13, color: '#B8860B', fontStyle: 'italic' },
+  // Edit toolbar
+  editToolbar: { paddingHorizontal: 16, paddingVertical: 10, alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F0E8E0' },
+	  editToggleBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, borderWidth: 1.5, borderColor: '#E17055', backgroundColor: '#FFF', marginBottom: 8 },
+	  editToggleActive: { backgroundColor: '#E17055', borderColor: '#E17055' },
+	  editToggleText: { fontSize: 13, fontWeight: '600', color: '#E17055' },
+	  editToggleTextActive: { color: '#FFF' },
+	  aiRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' },
+	  aiBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#E17055', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 },
+	  aiBtnText: { fontSize: 11, fontWeight: '600', color: '#FFF' },
+
   // Action bar
   actionBar: {
     paddingHorizontal: 16,
@@ -636,6 +945,9 @@ const styles = StyleSheet.create({
   },
   actionSave: {
     backgroundColor: '#27AE60',
+  },
+  actionPrint: {
+    backgroundColor: '#6C5CE7',
   },
   actionWord: {
     backgroundColor: '#2B579A',

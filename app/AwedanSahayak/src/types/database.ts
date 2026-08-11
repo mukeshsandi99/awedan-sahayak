@@ -149,9 +149,25 @@ export interface MarriageBiodataDraft {
   horoscope_details: string | null;
   template_style: string; // 'simple' | 'traditional' | 'modern' | 'photo_focused'
   language: string; // 'hi' | 'en'
+  color_theme?: string; // 'blue' | 'maroon' | 'green' | 'gold' | 'purple' | 'neutral'
   is_draft: number; // SQLite boolean
   created_at: string;
   updated_at: string;
+}
+
+// ── Digital Locker types (restored from D:\app) ─────────────────
+
+export type DocCategory = 'Identity' | 'Bank' | 'Education' | 'Income' | 'Land' | 'Police' | 'Court' | 'Medical' | 'Pension' | 'Other';
+
+export interface LockerDocument {
+  id: number;
+  title: string;
+  category: DocCategory;
+  tags?: string | null;
+  notes?: string | null;
+  file_uri: string | null;
+  date_added: string;
+  expiry_date?: string | null;
 }
 
 /** Barcode scan history record. */

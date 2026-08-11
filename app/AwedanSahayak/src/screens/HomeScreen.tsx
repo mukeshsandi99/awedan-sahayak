@@ -148,141 +148,138 @@ export default function HomeScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>आवेदन सहायक</Text>
-        <Text style={styles.subtitle}>कार्यालय चुनें</Text>
-      </View>
-
-      {/* Disclaimer banner */}
-      <View style={styles.disclaimerBanner}>
-        <Text style={styles.disclaimerText}>
-          ⚠️ यह ऐप किसी सरकारी संस्था से संबद्ध नहीं है - एक स्वतंत्र सहायक उपकरण{'\n'}
-          Not affiliated with any government entity - independent assistive tool
-        </Text>
-      </View>
-
-      {/* ── New Tools Section Cards ───────────────────────────── */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>सुरक्षा उपकरण</Text>
-      </View>
-      <View style={styles.toolRow}>
-        <TouchableOpacity
-          style={[styles.toolChip, { borderColor: '#D63031' }]}
-          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'ScamCheck' })}
-        >
-          <Ionicons name="shield-checkmark" size={18} color="#D63031" />
-          <Text style={styles.toolChipText}>सुरक्षा जांच</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.toolChip, { borderColor: '#2D3436' }]}
-          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'BarcodeScanner' })}
-        >
-          <Ionicons name="scan-outline" size={18} color="#2D3436" />
-          <Text style={styles.toolChipText}>स्कैनर</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>उपयोगी उपकरण</Text>
-      </View>
-      <View style={styles.toolRow}>
-        <TouchableOpacity
-          style={[styles.toolChip, { borderColor: '#E84393' }]}
-          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'BiodataForm', params: {} })}
-        >
-          <Ionicons name="people" size={18} color="#E84393" />
-          <Text style={styles.toolChipText}>बायोडाटा</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.toolChip, { borderColor: '#0984E3' }]}
-          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'CgpaCalculator' })}
-        >
-          <Ionicons name="calculator" size={18} color="#0984E3" />
-          <Text style={styles.toolChipText}>CGPA</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.toolChip, { borderColor: '#6C5CE7' }]}
-          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'HandwritingInput', params: {} })}
-        >
-          <Ionicons name="create" size={18} color="#6C5CE7" />
-          <Text style={styles.toolChipText}>हस्तलिखित</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.toolChip, { borderColor: '#00B894' }]}
-          onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'BarcodeGenerator' })}
-        >
-          <Ionicons name="qr-code" size={18} color="#00B894" />
-          <Text style={styles.toolChipText}>QR</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>न्यायालय</Text>
-      </View>
-      <TouchableOpacity
-        style={styles.courtCard}
-        activeOpacity={0.7}
-        onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'CourtPetitionList' })}
-      >
-        <View style={[styles.courtIconCircle]}>
-          <Ionicons name="scale" size={28} color="#FFFFFF" />
-        </View>
-        <View style={styles.scanTextGroup}>
-          <Text style={styles.scanCardTitle}>न्यायालय याचिकाएं</Text>
-          <Text style={styles.scanCardSubtitle}>Court Petitions</Text>
-          <Text style={styles.scanCardHint}>
-            जमानत, वाद पत्र, निषेधाज्ञा, शपथ पत्र व अन्य न्यायालयीन आवेदन
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#CCC" />
-      </TouchableOpacity>
-
-      {/* Custom / Blank application card */}
-      <TouchableOpacity
-        style={styles.customCard}
-        activeOpacity={0.7}
-        onPress={() => navigation.navigate('CustomApplication')}
-      >
-        <View style={styles.customIconCircle}>
-          <Ionicons name="create-outline" size={30} color="#FFFFFF" />
-        </View>
-        <View style={styles.scanTextGroup}>
-          <Text style={styles.scanCardTitle}>खाली आवेदन पत्र</Text>
-          <Text style={styles.scanCardSubtitle}>Create Your Own Application</Text>
-          <Text style={styles.scanCardHint}>
-            कोई भी कार्यालय, कोई भी आवेदन — अपने शब्दों में लिखें या बोलें
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#CCC" />
-      </TouchableOpacity>
-
-      {/* Scan handwritten application card */}
-      <TouchableOpacity
-        style={styles.scanCard}
-        activeOpacity={0.7}
-        onPress={() => navigation.navigate('HandwritingScan')}
-      >
-        <View style={styles.scanIconCircle}>
-          <Ionicons name="scan-outline" size={30} color="#FFFFFF" />
-        </View>
-        <View style={styles.scanTextGroup}>
-          <Text style={styles.scanCardTitle}>हस्तलिखित आवेदन स्कैन करें</Text>
-          <Text style={styles.scanCardSubtitle}>Scan Handwritten Application</Text>
-          <Text style={styles.scanCardHint}>
-            पुराने आवेदन की फोटो खींचें → डिजिटल टेक्स्ट पाएं → PDF/Word में एक्सपोर्ट करें
-          </Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#CCC" />
-      </TouchableOpacity>
-
       <FlatList
-        data={offices}
+        data={offices.filter(o => o.type !== 'court')}
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderCard}
         numColumns={2}
         columnWrapperStyle={styles.row}
-        contentContainerStyle={styles.grid}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        ListHeaderComponent={
+          <>
+            <View style={styles.header}>
+              <Text style={styles.title}>आवेदन सहायक</Text>
+              <Text style={styles.subtitle}>कार्यालय चुनें</Text>
+            </View>
+
+            {/* Disclaimer banner */}
+            <View style={styles.disclaimerBanner}>
+              <Text style={styles.disclaimerText}>
+                ⚠️ यह ऐप किसी सरकारी संस्था से संबद्ध नहीं है - एक स्वतंत्र सहायक उपकरण{'\n'}
+                Not affiliated with any government entity - independent assistive tool
+              </Text>
+            </View>
+
+            {/* ── PRIMARY: Document Scanner (ML Kit) ──────────── */}
+            <TouchableOpacity
+              style={styles.scannerCard}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('DocumentScanner', { mode: 'scan' })}
+            >
+              <View style={styles.scannerIconCircle}>
+                <Ionicons name="scan-outline" size={32} color="#FFFFFF" />
+              </View>
+              <View style={styles.scanTextGroup}>
+                <Text style={styles.scanCardTitle}>दस्तावेज़ स्कैनर</Text>
+                <Text style={styles.scanCardSubtitle}>Professional Document Scanner</Text>
+                <Text style={styles.scanCardHint}>
+                  आधार, पैन, रजिस्ट्री, प्रमाण पत्र — ML Kit ऑटो डिटेक्शन • PDF • लॉकर
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={22} color="#CCC" />
+            </TouchableOpacity>
+
+            {/* ── New Tools Section Cards ───────────────────────────── */}
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>सुरक्षा उपकरण</Text>
+            </View>
+            <View style={styles.toolRow}>
+              <TouchableOpacity
+                style={[styles.toolChip, { borderColor: '#D63031' }]}
+                onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'ScamCheck' })}
+              >
+                <Ionicons name="shield-checkmark" size={18} color="#D63031" />
+                <Text style={styles.toolChipText}>सुरक्षा जांच</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toolChip, { borderColor: '#2D3436' }]}
+                onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'BarcodeScanner' })}
+              >
+                <Ionicons name="scan-outline" size={18} color="#2D3436" />
+                <Text style={styles.toolChipText}>QR स्कैनर</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>उपयोगी उपकरण</Text>
+            </View>
+            <View style={styles.toolRow}>
+              <TouchableOpacity
+                style={[styles.toolChip, { borderColor: '#E84393' }]}
+                onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'BiodataForm', params: {} })}
+              >
+                <Ionicons name="people" size={18} color="#E84393" />
+                <Text style={styles.toolChipText}>बायोडाटा</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toolChip, { borderColor: '#0984E3' }]}
+                onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'CgpaCalculator' })}
+              >
+                <Ionicons name="calculator" size={18} color="#0984E3" />
+                <Text style={styles.toolChipText}>CGPA</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toolChip, { borderColor: '#6C5CE7' }]}
+                onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'HandwritingInput', params: {} })}
+              >
+                <Ionicons name="create" size={18} color="#6C5CE7" />
+                <Text style={styles.toolChipText}>हस्तलिखित</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.toolChip, { borderColor: '#00B894' }]}
+                onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'BarcodeGenerator' })}
+              >
+                <Ionicons name="qr-code" size={18} color="#00B894" />
+                <Text style={styles.toolChipText}>QR</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* ── Nyayalaya compact chip ────────────────────────── */}
+            <TouchableOpacity
+              style={styles.courtChip}
+              activeOpacity={0.7}
+              onPress={() => navigation.getParent()?.navigate('Tools', { screen: 'CourtPetitionList' })}
+            >
+              <Ionicons name="scale" size={16} color="#D63031" />
+              <Text style={styles.courtChipText}>न्यायालय</Text>
+              <Ionicons name="chevron-forward" size={14} color="#D63031" style={{ marginLeft: 'auto' }} />
+            </TouchableOpacity>
+
+            {/* Custom / Blank application card */}
+            <TouchableOpacity
+              style={styles.customCard}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate('CustomApplication')}
+            >
+              <View style={styles.customIconCircle}>
+                <Ionicons name="create-outline" size={30} color="#FFFFFF" />
+              </View>
+              <View style={styles.scanTextGroup}>
+                <Text style={styles.scanCardTitle}>खाली आवेदन पत्र</Text>
+                <Text style={styles.scanCardSubtitle}>Create Your Own Application</Text>
+                <Text style={styles.scanCardHint}>
+                  कोई भी कार्यालय, कोई भी आवेदन — अपने शब्दों में लिखें या बोलें
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={22} color="#CCC" />
+            </TouchableOpacity>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>कार्यालय</Text>
+            </View>
+          </>
+        }
       />
     </View>
   );
@@ -362,30 +359,31 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1A1A2E',
   },
-  courtCard: {
+  scrollContent: {
+    paddingBottom: 32,
+  },
+  courtChip: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     marginHorizontal: 16,
     marginBottom: 12,
-    borderRadius: 16,
-    padding: 16,
-    gap: 14,
-    borderWidth: 1.5,
-    borderColor: '#D63031',
-    shadowColor: '#D63031',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#FADBD8',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
-  courtIconCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: '#D63031',
-    alignItems: 'center',
-    justifyContent: 'center',
+  courtChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#D63031',
   },
 
   // Disclaimer banner
@@ -404,6 +402,33 @@ const styles = StyleSheet.create({
     color: '#856404',
     lineHeight: 16,
     textAlign: 'center',
+  },
+
+  // Document Scanner card (prominent primary feature)
+  scannerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 16,
+    padding: 16,
+    gap: 14,
+    borderWidth: 2,
+    borderColor: '#0984E3',
+    shadowColor: '#0984E3',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  scannerIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#0984E3',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // Scan card (full-width, above office grid)

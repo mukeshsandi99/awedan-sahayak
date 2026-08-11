@@ -1,34 +1,53 @@
 /**
  * AdMob Configuration — Central ad unit IDs and settings.
  *
- * ⚠️ IMPORTANT: These are Google's OFFICIAL TEST AD UNIT IDs.
- * Replace with YOUR production IDs BEFORE publishing to Play Store.
+ * MODES:
+ *   FORCE_TEST_MODE = true  → Google test ad units used (safe for dev/testing)
+ *   FORCE_TEST_MODE = false → Production ad units used (REAL ads, REAL revenue)
  *
- * Test IDs from: https://developers.google.com/admob/android/test-ads
+ * ⚠️  NEVER set FORCE_TEST_MODE = false during development or testing.
+ *     Clicking your own production ads violates AdMob policy.
+ *
+ * Test IDs reference: https://developers.google.com/admob/android/test-ads
  */
 
 import { Platform } from 'react-native';
 
+// ── Test mode ────────────────────────────────────────────────────────────
+
+/** Set to false ONLY when publishing to Google Play for real ad traffic. */
+export const FORCE_TEST_MODE = true;
+
+/** Returns true if test ad units should be used. */
+export function isTestMode(): boolean {
+  return __DEV__ || FORCE_TEST_MODE;
+}
+
 // ── App ID ───────────────────────────────────────────────────────────────
 
-export const AD_APP_ID = __DEV__
-  ? 'ca-app-pub-3940256099942544~3347511713'
-  : 'ca-app-pub-3940256099942544~3347511713'; // TODO: Replace with production App ID
+/** Production AdMob App ID for com.mmenterprises.awedansahayak */
+export const AD_APP_ID = 'ca-app-pub-4650752456313692~1347004127';
 
 // ── Ad Unit IDs ──────────────────────────────────────────────────────────
 
+/** Google official test ad unit IDs — used when isTestMode() returns true. */
 const TEST_IDS = {
   banner: 'ca-app-pub-3940256099942544/6300978111',
   interstitial: 'ca-app-pub-3940256099942544/1033173712',
   rewarded: 'ca-app-pub-3940256099942544/5224354917',
   appOpen: 'ca-app-pub-3940256099942544/3419835294',
-  native: 'ca-app-pub-3940256099942544/2247696110',
 };
 
-// TODO: Replace with production ad unit IDs before release
-const PROD_IDS = { ...TEST_IDS };
+/** Production ad unit IDs — used ONLY when isTestMode() returns false. */
+const PROD_IDS = {
+  banner: 'ca-app-pub-4650752456313692/3517605963',
+  interstitial: 'ca-app-pub-4650752456313692/6882135900',
+  rewarded: 'ca-app-pub-4650752456313692/9480379088',
+  appOpen: 'ca-app-pub-4650752456313692/5174568493',
+};
 
-export const AD_UNIT_IDS = __DEV__ ? TEST_IDS : PROD_IDS;
+/** Active ad unit IDs based on current mode. */
+export const AD_UNIT_IDS = isTestMode() ? TEST_IDS : PROD_IDS;
 
 // ── Frequency defaults ───────────────────────────────────────────────────
 

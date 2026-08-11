@@ -135,7 +135,7 @@ function buildRtf(options: RtfExportOptions): string {
 
   // RTF footer — watermark with credit
   const watermark = rtfUnicodeEscape(
-    '\\line\\line Awedan Sahayak ऐप से बनाया गया | एम.एम. एंटरप्राइजेज / M.M. Enterprises',
+    '\\line\\line Awedan Sahayak | एम.एम. एंटरप्राइजेज',
   );
   const rtfFooter = `\\par\\pard\\qc\\fs16\\cf2 ${watermark}\\par\n}`;
 

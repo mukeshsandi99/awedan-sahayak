@@ -4,6 +4,10 @@
     "strict": true
   },
   "exclude": [
-    "node_modules_disabled"
+    "node_modules_disabled",
+    "build48-backup",
+    "build49-backup",
+    "build50-backup",
+    "build51-backup"
   ]
 }

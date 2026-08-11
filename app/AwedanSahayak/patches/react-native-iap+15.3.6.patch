@@ -1,0 +1,44 @@
+diff --git a/node_modules/react-native-iap/android/build.gradle b/node_modules/react-native-iap/android/build.gradle
+index a1b2c3d..e4f5g6h 100644
+--- a/node_modules/react-native-iap/android/build.gradle
++++ b/node_modules/react-native-iap/android/build.gradle
+@@ -159,19 +159,21 @@ android {
+     def flavor = horizonEnabled ? 'horizon' : 'play'
+     missingDimensionStrategy "platform", flavor
+
+-    // Patched: skip CMake for IAP
+-    // externalNativeBuild {
+-    //   cmake {
+-    //     cppFlags "-frtti -fexceptions -Wall -Wextra -fstack-protector-all"
+-    //     arguments "-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+-    //     abiFilters (*reactNativeArchitectures())
+-    //     buildTypes {
+-    //       debug { cppFlags "-O1 -g" }
+-    //       release { cppFlags "-O2" }
+-    //     }
+-    //   }
+-    // }
++    externalNativeBuild {
++      cmake {
++        cppFlags "-frtti -fexceptions -Wall -Wextra -fstack-protector-all"
++        arguments "-DANDROID_STL=c++_shared", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
++        abiFilters (*reactNativeArchitectures())
++        buildTypes {
++          debug { cppFlags "-O1 -g" }
++          release { cppFlags "-O2" }
++        }
++      }
++    }
+   }
+
+-  // Patched: skip CMake for IAP to fix arm64 build failure
+-  // externalNativeBuild {
+-  //   cmake {
+-  //     path "CMakeLists.txt"
+-  //   }
+-  // }
++  externalNativeBuild {
++    cmake {
++      path "CMakeLists.txt"
++    }
++  }

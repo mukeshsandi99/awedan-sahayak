@@ -27,8 +27,10 @@ export interface PdfExportOptions {
   generatedText: string;
   /** Hindi name of the application type (e.g. "धमकी की शिकायत"). */
   applicationName: string;
-  /** Office type for the header. */
+  /** Office type for the header (thana, block, bdo, co, sdo, sp, dc, court, bank, college, school, pwd, rcd, bcd, transport, custom). */
   officeType: string;
+  /** Human-readable office name in Hindi. */
+  officeName?: string;
   /** Applicant's village for the filename. */
   village?: string;
   /** Applicant's name for the filename. */
@@ -133,6 +135,48 @@ async function getFontDataUri(): Promise<string> {
 // ── HTML template ───────────────────────────────────────────────────
 
 /**
+ * Returns the appropriate office header for the letterhead.
+ * Does NOT add "Government of India" or any fake banner.
+ * Returns empty string for custom/generic types.
+ */
+function getOfficeHeader(officeType: string, officeName?: string): string {
+  const name = officeName || '';
+  switch (officeType) {
+    case 'thana':
+      return name ? `सेवा में,<br>थाना प्रभारी,<br>${name}` : 'सेवा में,<br>थाना प्रभारी';
+    case 'co':
+      return name ? `सेवा में,<br>अंचल अधिकारी,<br>${name}` : 'सेवा में,<br>अंचल अधिकारी';
+    case 'sdo':
+      return name ? `सेवा में,<br>अनुमंडल अधिकारी,<br>${name}` : 'सेवा में,<br>अनुमंडल अधिकारी';
+    case 'sp':
+      return name ? `सेवा में,<br>पुलिस अधीक्षक,<br>${name}` : 'सेवा में,<br>पुलिस अधीक्षक';
+    case 'dc':
+      return name ? `सेवा में,<br>उपायुक्त,<br>${name}` : 'सेवा में,<br>उपायुक्त';
+    case 'bdo':
+      return name ? `सेवा में,<br>प्रखंड विकास पदाधिकारी,<br>${name}` : 'सेवा में,<br>प्रखंड विकास पदाधिकारी';
+    case 'block':
+      return name ? `सेवा में,<br>प्रखंड पदाधिकारी,<br>${name}` : 'सेवा में,<br>प्रखंड पदाधिकारी';
+    case 'court':
+      return name ? `सेवा में,<br>माननीय न्यायालय,<br>${name}` : 'सेवा में,<br>माननीय न्यायालय';
+    case 'bank':
+      return name ? `सेवा में,<br>शाखा प्रबंधक,<br>${name}` : 'सेवा में,<br>शाखा प्रबंधक';
+    case 'college':
+      return name ? `सेवा में,<br>प्रधानाचार्य,<br>${name}` : 'सेवा में,<br>प्रधानाचार्य';
+    case 'school':
+      return name ? `सेवा में,<br>प्रधानाध्यापक,<br>${name}` : 'सेवा में,<br>प्रधानाध्यापक';
+    case 'pwd':
+    case 'rcd':
+    case 'bcd':
+    case 'transport':
+      return name ? `सेवा में,<br>${name}` : 'सेवा में';
+    case 'custom':
+      return name || '';
+    default:
+      return name || '';
+  }
+}
+
+/**
  * Builds the full HTML document for the PDF.
  *
  * Devanagari rendering:
@@ -144,10 +188,10 @@ async function getFontDataUri(): Promise<string> {
  * Layout:
  * - The AI-generated text is the COMPLETE application (header, body,
  *   footer). The HTML only adds a minimal letterhead line and a
- *   watermark. No duplicate headers/footers.
+ *   watermark. No fake government banners. No duplicate headers.
  */
 async function buildPdfHtml(options: PdfExportOptions): Promise<string> {
-  const { generatedText, applicationName } = options;
+  const { generatedText, applicationName, officeType, officeName } = options;
 
   // Load the embedded font as base64 data URI
   const fontDataUri = await getFontDataUri();
@@ -160,7 +204,13 @@ async function buildPdfHtml(options: PdfExportOptions): Promise<string> {
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
 
-  return `<!DOCTYPE html>
+  // Build office-appropriate header — NO fake government banners
+  const officeHeader = getOfficeHeader(officeType, officeName);
+  const headerHtml = officeHeader
+    ? `<div class="letterhead"><div class="letterhead-office">${officeHeader}</div></div>`
+    : '';
+
+  const html = `<!DOCTYPE html>
 <html lang="hi">
 <head>
   <meta charset="UTF-8">
@@ -195,17 +245,21 @@ async function buildPdfHtml(options: PdfExportOptions): Promise<string> {
       font-kerning: normal;
     }
 
+    .mek-badge {
+      text-align: right; font-size: 11px; font-weight: 700; color: #999;
+      margin-bottom: 4px; letter-spacing: 1px;
+    }
     .letterhead {
-      text-align: center;
+      text-align: left;
       margin-bottom: 32px;
       padding-bottom: 16px;
       border-bottom: 2px solid #e0e0e0;
     }
-    .letterhead-official {
-      font-size: 12px;
-      color: #999;
-      /* Do NOT use letter-spacing on Devanagari text — breaks conjuncts */
-      word-spacing: 1px;
+    .letterhead-office {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1a1a1a;
+      line-height: 2.0;
     }
 
     .content {
@@ -227,19 +281,19 @@ async function buildPdfHtml(options: PdfExportOptions): Promise<string> {
   </style>
 </head>
 <body>
-  <div class="letterhead">
-    <div class="letterhead-official">भारत सरकार / Government of India — ${applicationName}</div>
-  </div>
+  ${headerHtml}
 
   <div class="content">
     ${bodyHtml}
   </div>
 
   <div class="watermark">
-    Awedan Sahayak ऐप से बनाया गया | एम.एम. एंटरप्राइजेज / M.M. Enterprises
+    Awedan Sahayak ऐप से बनाया गया | एम.एम. एंटरप्राइजेज
   </div>
 </body>
 </html>`;
+  console.log('[AppPDF] officeType=' + officeType + ' htmlLen=' + html.length);
+  return html;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -297,6 +351,90 @@ export async function sharePdf(uri: string, filename: string): Promise<void> {
     dialogTitle: 'आवेदन पत्र साझा करें / Share Application',
     UTI: 'com.adobe.pdf',
   });
+}
+
+// ── Scanner PDF exports (compatible with restored Document Scanner) ──
+
+export type QualityMode = 'small' | 'balanced' | 'high' | 'original' | 'verySmall';
+
+interface QualityConfig { label: string; labelHi: string; quality: number; maxWidth: number; }
+
+export const QUALITY_OPTIONS: Record<QualityMode, QualityConfig> = {
+  verySmall: { label: 'बहुत छोटा',  labelHi: 'Very Small', quality: 0.30, maxWidth: 800 },
+  small:     { label: 'छोटा आकार',  labelHi: 'Small',      quality: 0.45, maxWidth: 1200 },
+  balanced:  { label: 'संतुलित',    labelHi: 'Balanced',   quality: 0.70, maxWidth: 1800 },
+  high:      { label: 'उच्च गुणवत्ता', labelHi: 'High',   quality: 0.90, maxWidth: 2600 },
+  original:  { label: 'मूल गुणवत्ता', labelHi: 'Original', quality: 1.0,  maxWidth: 99999 },
+};
+
+export async function estimatePdfImageSize(
+  imageUris: string[],
+  qualityMode: QualityMode,
+): Promise<number> {
+  let totalBytes = 0;
+  const cfg = QUALITY_OPTIONS[qualityMode] || QUALITY_OPTIONS.balanced;
+  for (const uri of imageUris) {
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      totalBytes += ((info as any)?.size ?? 500_000) * cfg.quality;
+    } catch { totalBytes += 500_000 * cfg.quality; }
+  }
+  return totalBytes;
+}
+
+export interface ScannedPdfOptions {
+  imageUris: string[];
+  title: string;
+  qualityMode?: QualityMode;
+  pageSize?: 'A4' | 'Letter' | 'Legal' | 'Auto';
+  orientation?: 'portrait' | 'landscape';
+  margin?: number;
+  sessionId?: string;
+}
+
+export async function generateScannedPdf(
+  imageUrisOrOptions: string[] | ScannedPdfOptions,
+  title?: string,
+  qualityMode?: QualityMode,
+): Promise<{ uri: string; filename: string; pageCount: number; sizeBytes: number }> {
+  let opts: ScannedPdfOptions;
+  if (Array.isArray(imageUrisOrOptions)) {
+    opts = { imageUris: imageUrisOrOptions, title: title || 'Document', qualityMode: qualityMode || 'balanced' };
+  } else {
+    opts = imageUrisOrOptions;
+  }
+  const { imageUris } = opts;
+  if (!imageUris || imageUris.length === 0) throw new Error('No pages to generate PDF.');
+
+  const cfg = QUALITY_OPTIONS[opts.qualityMode || 'balanced'];
+  let imagesHtml = '';
+  for (const uri of imageUris) {
+    const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+    imagesHtml += `<div class="page"><img src="data:image/jpeg;base64,${b64}" style="width:100%;height:auto;" /></div>`;
+  }
+
+  // Build A4 page layout — each .page fills one A4 sheet
+  // Using @page + mm units for reliable multi-page printing in expo-print
+  const { uri } = await Print.printToFileAsync({
+    html: `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+@page{size:A4;margin:0}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{margin:0;padding:0;background:#fff}
+.page{page-break-after:always;break-after:page;width:210mm;height:297mm;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fff}
+.page:last-child{page-break-after:auto;break-after:auto}
+.page img{max-width:98%;max-height:98%;object-fit:contain;display:block}
+</style></head><body>${imagesHtml}</body></html>`,
+    width: 595.28,
+    height: 841.89,
+    base64: false,
+  });
+
+  const filename = `Scan_${Date.now()}.pdf`;
+  const destUri = `${FileSystem.documentDirectory}${filename}`;
+  await FileSystem.moveAsync({ from: uri, to: destUri });
+  const info = await FileSystem.getInfoAsync(destUri);
+  const sizeBytes = (info as any)?.size ?? 0;
+  return { uri: destUri, filename, pageCount: imageUris.length, sizeBytes };
 }
 
 /**

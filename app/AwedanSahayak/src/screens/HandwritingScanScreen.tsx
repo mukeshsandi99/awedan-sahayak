@@ -369,7 +369,7 @@ export default function HandwritingScanScreen({ navigation }: Props) {
       const result = await generatePdf({
         generatedText: editedText,
         applicationName: 'हस्तलिखित आवेदन',
-        officeType: 'thana',
+        officeType: 'custom',
       });
       setPdfUri(result.uri);
       setPdfFilename(result.filename);

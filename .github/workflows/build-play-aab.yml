@@ -1,0 +1,104 @@
+name: Build Play Store AAB
+
+on:
+  workflow_dispatch:
+    inputs:
+      versionCode:
+        description: 'versionCode for this build'
+        required: true
+        default: '6'
+      versionName:
+        description: 'versionName for this build'
+        required: true
+        default: '1.1.0'
+
+jobs:
+  build-aab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      REACT_NATIVE_ARCHITECTURES: arm64-v8a
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006 cmake;3.22.1'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      - name: Set versionCode
+        working-directory: app/AwedanSahayak
+        run: |
+          sed -i "s/versionCode [0-9]*/versionCode ${{ github.event.inputs.versionCode }}/" android/app/build.gradle
+          echo "Version set to ${{ github.event.inputs.versionCode }} (${{ github.event.inputs.versionName }})"
+
+      - name: Install dependencies
+        working-directory: app/AwedanSahayak
+        run: npm ci
+
+      - name: TypeScript check
+        working-directory: app/AwedanSahayak
+        run: npx tsc --noEmit
+
+      - name: Setup signing
+        working-directory: app/AwedanSahayak/android/app
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > awedan-sahayak.keystore
+          cat > release-signing.properties << EOF
+          storeFile=awedan-sahayak.keystore
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+          echo "Signing configured"
+
+      - name: Build AAB
+        working-directory: app/AwedanSahayak/android
+        env:
+          ORG_GRADLE_PROJECT_reactNativeArchitectures: arm64-v8a
+        run: ./gradlew bundleRelease --no-daemon --max-workers=1
+
+      - name: Verify AAB signing
+        working-directory: app/AwedanSahayak/android/app/build/outputs/bundle/release
+        run: |
+          SHA=$(keytool -printcert -jarfile app-release.aab 2>/dev/null | grep SHA256 | awk '{print $2}' | tr -d ':')
+          EXPECTED="54FECE6151FD24875718213D192D492E2A9A193DD92A309CD4AC5A08019E205C"
+          if [ "$SHA" = "$EXPECTED" ]; then
+            echo "✅ Signing verified: $SHA"
+          else
+            echo "❌ WRONG SIGNATURE: got $SHA, expected $EXPECTED"
+            exit 1
+          fi
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: awedan-sahayak-v${{ github.event.inputs.versionName }}-vc${{ github.event.inputs.versionCode }}
+          path: app/AwedanSahayak/android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 90

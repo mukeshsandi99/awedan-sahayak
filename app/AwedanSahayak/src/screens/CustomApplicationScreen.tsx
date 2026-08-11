@@ -23,6 +23,7 @@ import {
   Platform,
   Alert,
   Animated,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -41,7 +42,7 @@ type Props = NativeStackScreenProps<HomeStackParamList, 'CustomApplication'>;
 // ── Field constants ───────────────────────────────────────────────────
 
 /** Custom fields unique to this screen. */
-const CUSTOM_FIELD_KEYS = ['office_name', 'recipient_designation', 'custom_description'] as const;
+const CUSTOM_FIELD_KEYS = ['office_name', 'recipient_designation', 'custom_description', 'incident_date', 'incident_time'] as const;
 
 /** Base identity fields — same as ApplicationFormScreen's BASE_IDENTITY_FIELDS. */
 const BASE_IDENTITY_FIELDS = [
@@ -61,6 +62,8 @@ const ALL_FIELDS = [
   'office_name',
   'recipient_designation',
   'custom_description',
+  'incident_date',
+  'incident_time',
   ...BASE_IDENTITY_FIELDS,
 ];
 
@@ -68,13 +71,15 @@ const ALL_FIELDS = [
 const LONG_TEXT_FIELDS = new Set(['custom_description']);
 
 /** Fields that show a mic button (all custom fields + long identity fields). */
-const FIELDS_WITH_MIC = new Set(['office_name', 'recipient_designation', 'custom_description']);
+const FIELDS_WITH_MIC = new Set(['office_name', 'recipient_designation', 'custom_description', 'applicant_name', 'father_name', 'mother_name', 'village', 'post_office', 'police_station', 'district', 'state', 'address', 'mobile', 'subject']);
 
 /** Bilingual labels for custom fields. */
 const CUSTOM_FIELD_LABELS: Record<string, string> = {
   office_name: 'किस कार्यालय के लिए? (Which Office?)',
   recipient_designation: 'पदनाम — वैकल्पिक (Recipient\'s Designation — Optional)',
   custom_description: 'आपको क्या लिखवाना है? पूरी बात बताएं (Describe your issue in detail)',
+  incident_date: 'घटना की तारीख / दिनांक — वैकल्पिक (Incident Date — Optional)',
+  incident_time: 'घटना का समय — वैकल्पिक (Incident Time — Optional)',
 };
 
 /** Placeholder hints for custom fields. */
@@ -82,6 +87,8 @@ const FIELD_PLACEHOLDERS: Record<string, string> = {
   office_name: 'जैसे: जिला शिक्षा पदाधिकारी, मुख्यमंत्री कार्यालय...',
   recipient_designation: 'जैसे: महोदय, माननीय मंत्री जी...',
   custom_description: 'अपनी पूरी समस्या या अनुरोध अपने शब्दों में लिखें या बोलें...',
+  incident_date: 'जैसे: 15/08/2026 (DD/MM/YYYY)',
+  incident_time: 'जैसे: सुबह 10 बजे / 10:00 AM',
 };
 
 /** Profile prefill map (same as ApplicationFormScreen PREFILL_MAP). */
@@ -131,6 +138,16 @@ export default function CustomApplicationScreen({ route, navigation }: Props) {
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  // Date/time picker state
+  const [datePickerVisible, setDatePickerVisible] = useState(false);
+  const [timePickerVisible, setTimePickerVisible] = useState(false);
+  const [pickerDay, setPickerDay] = useState(1);
+  const [pickerMonth, setPickerMonth] = useState(0);
+  const [pickerYear, setPickerYear] = useState(2026);
+  const [pickerHour, setPickerHour] = useState(10);
+  const [pickerMinute, setPickerMinute] = useState(0);
+  const [pickerAmPm, setPickerAmPm] = useState<'AM' | 'PM'>('AM');
 
   // Voice recording state
   const [activeVoiceField, setActiveVoiceField] = useState<string | null>(null);
@@ -252,6 +269,64 @@ export default function CustomApplicationScreen({ route, navigation }: Props) {
     }
   };
 
+  // ── Date/Time picker handlers ──────────────────────────────────────
+
+  const showDatePicker = () => {
+    // Parse existing date if any
+    const existing = formData.incident_date?.trim() || '';
+    const match = existing.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (match) {
+      setPickerDay(parseInt(match[1], 10));
+      setPickerMonth(parseInt(match[2], 10) - 1);
+      setPickerYear(parseInt(match[3], 10));
+    } else {
+      const now = new Date();
+      setPickerDay(1);
+      setPickerMonth(0);
+      setPickerYear(now.getFullYear());
+    }
+    setDatePickerVisible(true);
+  };
+
+  const confirmDate = () => {
+    const dd = String(pickerDay).padStart(2, '0');
+    const mm = String(pickerMonth + 1).padStart(2, '0');
+    const yyyy = String(pickerYear);
+    setField('incident_date', `${dd}/${mm}/${yyyy}`);
+    setDatePickerVisible(false);
+  };
+
+  const showTimePicker = () => {
+    const existing = formData.incident_time?.trim() || '';
+    const match24 = existing.match(/^(\d{1,2}):(\d{2})$/);
+    const match12 = existing.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (match24) {
+      let h = parseInt(match24[1], 10);
+      if (h >= 12) { setPickerAmPm('PM'); if (h > 12) h -= 12; }
+      else { setPickerAmPm('AM'); if (h === 0) h = 12; }
+      setPickerHour(h);
+      setPickerMinute(parseInt(match24[2], 10));
+    } else if (match12) {
+      setPickerHour(parseInt(match12[1], 10));
+      setPickerMinute(parseInt(match12[2], 10));
+      setPickerAmPm(match12[3].toUpperCase() as 'AM' | 'PM');
+    } else {
+      setPickerHour(10);
+      setPickerMinute(0);
+      setPickerAmPm('AM');
+    }
+    setTimePickerVisible(true);
+  };
+
+  const confirmTime = () => {
+    const hh = String(pickerHour).padStart(2, '0');
+    const mm = String(pickerMinute).padStart(2, '0');
+    setField('incident_time', `${hh}:${mm} ${pickerAmPm}`);
+    setTimePickerVisible(false);
+  };
+
+  const daysInMonth = (month: number, year: number) => new Date(year, month + 1, 0).getDate();
+
   // ── Generate ──────────────────────────────────────────────────────
 
   const handleGenerate = async () => {
@@ -285,6 +360,13 @@ export default function CustomApplicationScreen({ route, navigation }: Props) {
       if (formData[field]?.trim()) {
         identityFormData[field] = formData[field].trim();
       }
+    }
+    // Include optional incident date/time if provided
+    if (formData.incident_date?.trim()) {
+      identityFormData['incident_date'] = formData.incident_date.trim();
+    }
+    if (formData.incident_time?.trim()) {
+      identityFormData['incident_time'] = formData.incident_time.trim();
     }
 
     const payload = {
@@ -418,6 +500,50 @@ export default function CustomApplicationScreen({ route, navigation }: Props) {
     const required = isRequired(field);
     const placeholder = getPlaceholder(field);
 
+    // Date picker field
+    if (field === 'incident_date') {
+      return (
+        <View key={field} style={styles.fieldContainer}>
+          <View style={styles.labelRow}>
+            <Text style={styles.fieldLabel}>{getLabel(field)}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.pickerButton}
+            onPress={showDatePicker}
+            activeOpacity={0.7}
+            disabled={submitting}
+          >
+            <Ionicons name="calendar-outline" size={20} color="#E17055" style={{ marginRight: 8 }} />
+            <Text style={[styles.pickerText, !value && styles.pickerPlaceholder]}>
+              {value || placeholder || 'दिनांक चुनें / Select Date'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    // Time picker field
+    if (field === 'incident_time') {
+      return (
+        <View key={field} style={styles.fieldContainer}>
+          <View style={styles.labelRow}>
+            <Text style={styles.fieldLabel}>{getLabel(field)}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.pickerButton}
+            onPress={showTimePicker}
+            activeOpacity={0.7}
+            disabled={submitting}
+          >
+            <Ionicons name="time-outline" size={20} color="#E17055" style={{ marginRight: 8 }} />
+            <Text style={[styles.pickerText, !value && styles.pickerPlaceholder]}>
+              {value || placeholder || 'समय चुनें / Select Time'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
     return (
       <View key={field} style={styles.fieldContainer}>
         <View style={styles.labelRow}>
@@ -534,11 +660,130 @@ export default function CustomApplicationScreen({ route, navigation }: Props) {
         {/* Bottom spacer */}
         <View style={{ height: 40 }} />
       </ScrollView>
-    </KeyboardAvoidingView>
-  );
-}
 
-// ── Styles ────────────────────────────────────────────────────────────
+        {/* ── Date Picker Modal ──────────────────────────────────── */}
+        <Modal visible={datePickerVisible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>दिनांक चुनें / Select Date</Text>
+
+              {/* Year selector */}
+              <View style={styles.pickerRow}>
+                <TouchableOpacity onPress={() => setPickerYear(y => y - 1)} style={styles.pickerArrow}>
+                  <Ionicons name="chevron-back" size={22} color="#E17055" />
+                </TouchableOpacity>
+                <ScrollView style={styles.pickerScroll} horizontal showsHorizontalScrollIndicator={false}>
+                  {Array.from({ length: 21 }, (_, i) => pickerYear - 10 + i).map(y => (
+                    <TouchableOpacity key={y} onPress={() => setPickerYear(y)}
+                      style={[styles.pickerItem, y === pickerYear && styles.pickerItemSelected]}>
+                      <Text style={[styles.pickerItemText, y === pickerYear && styles.pickerItemTextSelected]}>{y}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                <TouchableOpacity onPress={() => setPickerYear(y => y + 1)} style={styles.pickerArrow}>
+                  <Ionicons name="chevron-forward" size={22} color="#E17055" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Month selector */}
+              <View style={styles.pickerRow}>
+                <Text style={styles.pickerLabel}>महीना:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {['जनवरी','फरवरी','मार्च','अप्रैल','मई','जून','जुलाई','अगस्त','सितंबर','अक्टूबर','नवंबर','दिसंबर'].map((m, i) => (
+                    <TouchableOpacity key={m} onPress={() => setPickerMonth(i)}
+                      style={[styles.pickerItem, i === pickerMonth && styles.pickerItemSelected]}>
+                      <Text style={[styles.pickerItemText, i === pickerMonth && styles.pickerItemTextSelected]}>{m}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Day selector */}
+              <View style={styles.pickerRow}>
+                <Text style={styles.pickerLabel}>दिन:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  {Array.from({ length: daysInMonth(pickerMonth, pickerYear) }, (_, i) => i + 1).map(d => (
+                    <TouchableOpacity key={d} onPress={() => setPickerDay(d)}
+                      style={[styles.pickerItem, d === pickerDay && styles.pickerItemSelected]}>
+                      <Text style={[styles.pickerItemText, d === pickerDay && styles.pickerItemTextSelected]}>{d}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity onPress={() => setDatePickerVisible(false)} style={styles.modalCancelBtn}>
+                  <Text style={styles.modalCancelText}>रद्द करें</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={confirmDate} style={styles.modalConfirmBtn}>
+                  <Text style={styles.modalConfirmText}>ठीक है</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* ── Time Picker Modal ──────────────────────────────────── */}
+        <Modal visible={timePickerVisible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>समय चुनें / Select Time</Text>
+
+              <View style={styles.timePickerRow}>
+                {/* Hour */}
+                <View style={styles.timeCol}>
+                  <Text style={styles.pickerLabel}>घंटा</Text>
+                  <ScrollView style={{ maxHeight: 180 }}>
+                    {[12,1,2,3,4,5,6,7,8,9,10,11].map(h => (
+                      <TouchableOpacity key={h} onPress={() => setPickerHour(h)}
+                        style={[styles.pickerItem, h === pickerHour && styles.pickerItemSelected]}>
+                        <Text style={[styles.pickerItemText, h === pickerHour && styles.pickerItemTextSelected]}>{h}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* Minute */}
+                <View style={styles.timeCol}>
+                  <Text style={styles.pickerLabel}>मिनट</Text>
+                  <ScrollView style={{ maxHeight: 180 }}>
+                    {[0,5,10,15,20,25,30,35,40,45,50,55].map(m => (
+                      <TouchableOpacity key={m} onPress={() => setPickerMinute(m)}
+                        style={[styles.pickerItem, m === pickerMinute && styles.pickerItemSelected]}>
+                        <Text style={[styles.pickerItemText, m === pickerMinute && styles.pickerItemTextSelected]}>{String(m).padStart(2,'0')}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+
+                {/* AM/PM */}
+                <View style={styles.timeCol}>
+                  <Text style={styles.pickerLabel}>AM/PM</Text>
+                  {(['AM','PM'] as const).map(v => (
+                    <TouchableOpacity key={v} onPress={() => setPickerAmPm(v)}
+                      style={[styles.pickerItem, v === pickerAmPm && styles.pickerItemSelected]}>
+                      <Text style={[styles.pickerItemText, v === pickerAmPm && styles.pickerItemTextSelected]}>{v}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity onPress={() => setTimePickerVisible(false)} style={styles.modalCancelBtn}>
+                  <Text style={styles.modalCancelText}>रद्द करें</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={confirmTime} style={styles.modalConfirmBtn}>
+                  <Text style={styles.modalConfirmText}>ठीक है</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </KeyboardAvoidingView>
+    );
+  }
+
+  // ── Styles ────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
@@ -684,5 +929,121 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+
+  // ── Date/Time picker styles ────────────────────────────────────────
+
+  pickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E8E8E8',
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 14 : 12,
+    minHeight: 48,
+  },
+  pickerText: {
+    fontSize: 15,
+    color: '#1A1A2E',
+  },
+  pickerPlaceholder: {
+    color: '#CCC',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 34,
+    maxHeight: '70%',
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1A1A2E',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  pickerLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#888',
+    width: 60,
+  },
+  pickerScroll: {
+    flex: 1,
+  },
+  pickerArrow: {
+    padding: 8,
+  },
+  pickerItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginRight: 4,
+    backgroundColor: '#F5F5F5',
+  },
+  pickerItemSelected: {
+    backgroundColor: '#E17055',
+  },
+  pickerItemText: {
+    fontSize: 14,
+    color: '#555',
+  },
+  pickerItemTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  timePickerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 16,
+  },
+  timeCol: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#EEE',
+  },
+  modalCancelBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  modalCancelText: {
+    fontSize: 15,
+    color: '#888',
+    fontWeight: '600',
+  },
+  modalConfirmBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#E17055',
+  },
+  modalConfirmText: {
+    fontSize: 15,
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
 });

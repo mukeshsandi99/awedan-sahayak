@@ -11,7 +11,7 @@ const log = createLogger('FactGuard');
 const PROTECTED_KEYS = [
   'applicant_name', 'parent_spouse_name', 'father_name', 'husband_name',
   'village', 'post', 'thana', 'police_station', 'district', 'state',
-  'mobile', 'phone', 'date', 'amount', 'khata', 'plot', 'area',
+  'mobile', 'phone', 'date', 'incident_date', 'incident_time', 'amount', 'khata', 'plot', 'area',
 ];
 
 // ── Amount normalization ─────────────────────────────────────────────

@@ -9,6 +9,9 @@ import ApplicationPreviewScreen from '../screens/ApplicationPreviewScreen';
 import HandwritingScanScreen from '../screens/HandwritingScanScreen';
 import PaywallScreen from '../screens/PaywallScreen';
 import CustomApplicationScreen from '../screens/CustomApplicationScreen';
+import DocumentScannerScreen from '../screens/DocumentScannerScreen';
+import ScanEditorScreen from '../screens/ScanEditorScreen';
+import DigitalLockerScreen from '../screens/DigitalLockerScreen';
 
 export type HomeStackParamList = {
   HomeMain: undefined;
@@ -21,8 +24,13 @@ export type HomeStackParamList = {
     officeType: string;
     applicationTypeId: number | null;
     savedApplicationId: number | null;
+    /** Original form data for fact preservation during AI revision */
+    formData?: Record<string, string>;
   };
-  HandwritingScan: undefined;
+  HandwritingScan: { mode?: 'application' | 'document' } | undefined;
+  DocumentScanner: { mode: 'scan' | 'gallery' } | undefined;
+  ScanEditor: { imageUri: string; pageIndex?: number } | undefined;
+  DigitalLocker: undefined;
   Paywall: { applicationTypeId: number; applicationName: string } | undefined;
 };
 
@@ -90,6 +98,30 @@ export default function HomeStack() {
         component={CustomApplicationScreen}
         options={{
           title: 'खाली आवेदन पत्र',
+          headerBackTitle: 'होम',
+        }}
+      />
+      <Stack.Screen
+        name="DocumentScanner"
+        component={DocumentScannerScreen}
+        options={{
+          title: 'दस्तावेज़ स्कैनर',
+          headerBackTitle: 'होम',
+        }}
+      />
+      <Stack.Screen
+        name="ScanEditor"
+        component={ScanEditorScreen}
+        options={{
+          title: 'क्रॉप एडिटर',
+          headerBackTitle: 'स्कैनर',
+        }}
+      />
+      <Stack.Screen
+        name="DigitalLocker"
+        component={DigitalLockerScreen}
+        options={{
+          title: 'डिजिटल लॉकर',
           headerBackTitle: 'होम',
         }}
       />

@@ -520,6 +520,8 @@ export default function ApplicationFormScreen({ route, navigation }: Props) {
             parsedFields = [baseField, ...parsedFields];
           }
         }
+        // Filter out incident date/time — these only appear in Blank Application form
+        parsedFields = parsedFields.filter((f: string) => f !== 'incident_date' && f !== 'incident_time');
         setFields(parsedFields);
 
         // Build initial form data with pre-fill from profile

@@ -4,8 +4,8 @@
  * Shown when the user has exhausted their 5 free applications and
  * has no active subscription or paid credits. Offers two options:
  *
- *   1. ₹100/माह subscription — unlimited applications
- *   2. ₹10 one-time — single application credit
+ *   1. ₹149/माह subscription — unlimited applications
+ *   2. ₹11 one-time — single application credit
  *
  * After successful purchase, auto-navigates back so the user can
  * continue generating their application.
@@ -45,8 +45,8 @@ export default function PaywallScreen({ navigation }: Props) {
   const [restoring, setRestoring] = useState(false);
   const [freeUsed, setFreeUsed] = useState(0);
   const [credits, setCredits] = useState(0);
-  const [monthlyPrice, setMonthlyPrice] = useState('₹100/माह');
-  const [singlePrice, setSinglePrice] = useState('₹10');
+  const [monthlyPrice, setMonthlyPrice] = useState('₹149/माह');
+  const [singlePrice, setSinglePrice] = useState('₹11');
   const [iapAvailable, setIapAvailable] = useState(false);
 
   // ── Load state on mount ───────────────────────────────────────────

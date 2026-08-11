@@ -1453,11 +1453,26 @@ async function migrateV2ExpansionTables(): Promise<void> {
       );
     `);
 
+    // ── Digital Locker table (V3) ──────────────────────────────────
+    if (!db) throw new Error('Database not initialized');
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS locker_documents (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        title         TEXT    NOT NULL,
+        category      TEXT    NOT NULL DEFAULT 'Other',
+        tags          TEXT,
+        notes         TEXT,
+        file_uri      TEXT,
+        date_added    TEXT    NOT NULL DEFAULT (datetime('now')),
+        expiry_date   TEXT
+      );
+    `);
+
     // ── Record migration ───────────────────────────────────────────
     await recordMigration(V2_MIGRATION_KEY);
     // Bump schema version
     await setMetadata('schema_version', '2');
-    console.log('[DB] ✅ V2 expansion migration complete — 6 new tables created, schema_version=2.');
+    console.log('[DB] ✅ V2 expansion migration complete — 7 new tables created, schema_version=2.');
   } catch (err: any) {
     console.error('[DB] ❌ V2 expansion migration failed:', err?.message);
     throw err;
@@ -1775,4 +1790,51 @@ export async function getCourtPetitionById(id: number): Promise<CourtPetitionDra
 export async function deleteCourtPetition(id: number): Promise<boolean> {
   const result = await getDb().runAsync('DELETE FROM court_petition_drafts WHERE id = ?;', id);
   return (result.changes ?? 0) > 0;
+}
+
+// ── Digital Locker (restored from D:\app) ────────────────────────────
+
+import type { LockerDocument, DocCategory } from '../types/database';
+
+export async function addLockerDocument(doc: {
+  title: string; category: DocCategory; tags?: string; notes?: string | null; file_uri: string | null;
+}): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO locker_documents (title, category, tags, notes, file_uri, date_added)
+     VALUES (?, ?, ?, ?, ?, datetime('now'));`,
+    doc.title, doc.category, doc.tags ?? '', doc.notes ?? null, doc.file_uri,
+  );
+}
+
+export async function getAllLockerDocuments(
+  category?: DocCategory, search?: string,
+): Promise<LockerDocument[]> {
+  const db = await getDb();
+  let sql = 'SELECT * FROM locker_documents WHERE 1=1';
+  const params: any[] = [];
+  if (category) { sql += ' AND category = ?'; params.push(category); }
+  if (search) { sql += ' AND (title LIKE ? OR tags LIKE ? OR notes LIKE ?)'; const s = `%${search}%`; params.push(s, s, s); }
+  sql += ' ORDER BY date_added DESC';
+  return db.getAllAsync<LockerDocument>(sql, ...params);
+}
+
+export async function deleteLockerDocument(id: number): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM locker_documents WHERE id = ?;', id);
+}
+
+export async function getLockerStats(): Promise<{
+  total: number; categories: Record<string, number>;
+}> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ category: string; count: number }>(
+    'SELECT category, COUNT(*) as count FROM locker_documents GROUP BY category;',
+  );
+  const stats: { total: number; categories: Record<string, number> } = { total: 0, categories: {} };
+  for (const r of rows) {
+    stats.categories[r.category] = r.count;
+    stats.total += r.count;
+  }
+  return stats;
 }
